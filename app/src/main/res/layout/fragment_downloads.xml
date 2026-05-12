@@ -11,7 +11,7 @@
             android:id="@+id/download_poster_blur"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:alpha="0.22"
+            android:alpha="0.35"
             android:background="?attr/primaryBlackBackground"
             android:contentDescription="@string/background_image_descript"
             android:scaleType="centerCrop"
