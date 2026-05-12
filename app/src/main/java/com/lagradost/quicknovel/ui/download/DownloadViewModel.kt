@@ -27,10 +27,13 @@ import com.lagradost.quicknovel.BookDownloader2.downloadRemoved
 import com.lagradost.quicknovel.BookDownloader2Helper.IMPORT_SOURCE_PDF
 import com.lagradost.quicknovel.CURRENT_TAB
 import com.lagradost.quicknovel.CommonActivity.activity
+import com.lagradost.quicknovel.DOWNLOAD_COMPLETED_ONLY_FILTER
 import com.lagradost.quicknovel.DOWNLOAD_EPUB_LAST_ACCESS
+import com.lagradost.quicknovel.DOWNLOAD_NOT_STARTED_ONLY_FILTER
 import com.lagradost.quicknovel.DOWNLOAD_NORMAL_SORTING_METHOD
 import com.lagradost.quicknovel.DOWNLOAD_SETTINGS
 import com.lagradost.quicknovel.DOWNLOAD_SORTING_METHOD
+import com.lagradost.quicknovel.DOWNLOAD_UNREAD_ONLY_FILTER
 import com.lagradost.quicknovel.DownloadActionType
 import com.lagradost.quicknovel.DownloadFileWorkManager
 import com.lagradost.quicknovel.DownloadFileWorkManager.Companion.viewModel
@@ -38,6 +41,7 @@ import com.lagradost.quicknovel.DownloadProgressState
 import com.lagradost.quicknovel.DownloadState
 import com.lagradost.quicknovel.MainActivity
 import com.lagradost.quicknovel.MainActivity.Companion.loadResult
+import com.lagradost.quicknovel.PreferenceDelegate
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.RESULT_BOOKMARK
 import com.lagradost.quicknovel.RESULT_BOOKMARK_STATE
@@ -48,6 +52,7 @@ import com.lagradost.quicknovel.mvvm.logError
 import com.lagradost.quicknovel.ui.ReadType
 import com.lagradost.quicknovel.util.Apis.Companion.getApiFromNameOrNull
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
+import com.lagradost.quicknovel.util.LibraryProgress
 import com.lagradost.quicknovel.util.ResultCached
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -86,6 +91,8 @@ const val REVERSE_LAST_UPDATED_SORT = 10
 
 const val CHAPTER_SORT = 11
 const val REVERSE_CHAPTER_SORT = 12
+const val UNREAD_CHAPTER_SORT = 13
+const val REVERSE_UNREAD_CHAPTER_SORT = 14
 
 data class SortingMethod(@StringRes val name: Int, val id: Int, val inverse: Int = id)
 class DownloadViewModel : ViewModel() {
@@ -111,6 +118,27 @@ class DownloadViewModel : ViewModel() {
             SortingMethod(R.string.default_sort, DEFAULT_SORT),
             SortingMethod(R.string.recently_sort, LAST_ACCES_SORT, REVERSE_LAST_ACCES_SORT),
             SortingMethod(R.string.alpha_sort, ALPHA_SORT, REVERSE_ALPHA_SORT),
+            SortingMethod(
+                R.string.unread_chapter_sort,
+                UNREAD_CHAPTER_SORT,
+                REVERSE_UNREAD_CHAPTER_SORT
+            ),
+        )
+
+        var unreadOnlyFilter by PreferenceDelegate(
+            DOWNLOAD_UNREAD_ONLY_FILTER,
+            false,
+            Boolean::class
+        )
+        var notStartedOnlyFilter by PreferenceDelegate(
+            DOWNLOAD_NOT_STARTED_ONLY_FILTER,
+            false,
+            Boolean::class
+        )
+        var completedOnlyFilter by PreferenceDelegate(
+            DOWNLOAD_COMPLETED_ONLY_FILTER,
+            false,
+            Boolean::class
         )
     }
 
@@ -120,6 +148,7 @@ class DownloadViewModel : ViewModel() {
         ReadType.PLAN_TO_READ,
         ReadType.COMPLETED,
         ReadType.DROPPED,
+        ReadType.TRASH,
     )
 
     var activeQuery: String = ""
@@ -404,6 +433,16 @@ class DownloadViewModel : ViewModel() {
                 currentArray
             }
 
+            UNREAD_CHAPTER_SORT -> {
+                currentArray.sortByDescending { t -> LibraryProgress.unreadCount(t) }
+                currentArray
+            }
+
+            REVERSE_UNREAD_CHAPTER_SORT -> {
+                currentArray.sortBy { t -> LibraryProgress.unreadCount(t) }
+                currentArray
+            }
+
             REVERSE_LAST_ACCES_SORT -> {
                 currentArray.sortBy { t ->
                     (getKey<Long>(
@@ -425,7 +464,14 @@ class DownloadViewModel : ViewModel() {
                 }
                 currentArray
             }
-        }.filter { matchesQuery(it.name) }
+        }.filter {
+            matchesQuery(it.name) && LibraryProgress.matchesFilters(
+                cached = it,
+                unreadOnly = unreadOnlyFilter,
+                notStartedOnly = notStartedOnlyFilter,
+                completedOnly = completedOnlyFilter
+            )
+        }
     }
 
     // very shitty copy as we need to deep copy to actually update it
@@ -460,6 +506,7 @@ class DownloadViewModel : ViewModel() {
             ReadType.COMPLETED.prefValue to arrayListOf(),
             ReadType.ON_HOLD.prefValue to arrayListOf(),
             ReadType.READING.prefValue to arrayListOf(),
+            ReadType.TRASH.prefValue to arrayListOf(),
         )
 
         withContext(Dispatchers.IO) {

@@ -28,4 +28,43 @@ class LibraryProgressTest {
         assertTrue(LibraryProgress.isCompletedLike(status = "Ongoing", lastChapterName = "Finale"))
         assertFalse(LibraryProgress.isCompletedLike(status = "Ongoing", lastChapterName = "Chapter 12"))
     }
+
+    @Test
+    fun libraryFiltersCombineWithAndSemantics() {
+        assertTrue(
+            LibraryProgress.matchesFilters(
+                totalChapters = 10,
+                readCount = 0,
+                status = "Completed",
+                lastChapterName = null,
+                unreadOnly = true,
+                notStartedOnly = true,
+                completedOnly = true
+            )
+        )
+
+        assertFalse(
+            LibraryProgress.matchesFilters(
+                totalChapters = 10,
+                readCount = 4,
+                status = "Completed",
+                lastChapterName = null,
+                unreadOnly = true,
+                notStartedOnly = true,
+                completedOnly = true
+            )
+        )
+
+        assertFalse(
+            LibraryProgress.matchesFilters(
+                totalChapters = 10,
+                readCount = 10,
+                status = "Ongoing",
+                lastChapterName = "Chapter 10",
+                unreadOnly = true,
+                notStartedOnly = false,
+                completedOnly = false
+            )
+        )
+    }
 }

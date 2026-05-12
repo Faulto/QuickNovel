@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.view.View
 import android.widget.ImageView
 import androidx.appcompat.widget.SearchView
+import androidx.core.view.isVisible
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView
@@ -201,9 +202,9 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
         }
 
         binding.downloadFab.setOnClickListener { view ->
-            val binding = SortBottomSheetBinding.inflate(layoutInflater, null, false)
+            val sheetBinding = SortBottomSheetBinding.inflate(layoutInflater, null, false)
             val bottomSheetDialog = BottomSheetDialog(view.context)
-            bottomSheetDialog.setContentView(binding.root)
+            bottomSheetDialog.setContentView(sheetBinding.root)
 
             val (sorting, key) = if (isOnDownloads) {
                 DownloadViewModel.sortingMethods to DOWNLOAD_SORTING_METHOD
@@ -219,7 +220,30 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
             }.apply {
                 submitList(sorting.toList())
             }
-            binding.sortClick.adapter = adapter
+            sheetBinding.sortClick.adapter = adapter
+
+            sheetBinding.libraryFilterOptions.isVisible = !isOnDownloads
+            sheetBinding.libraryUnreadOnlyFilter.isChecked = DownloadViewModel.unreadOnlyFilter
+            sheetBinding.libraryNotStartedOnlyFilter.isChecked =
+                DownloadViewModel.notStartedOnlyFilter
+            sheetBinding.libraryCompletedOnlyFilter.isChecked =
+                DownloadViewModel.completedOnlyFilter
+
+            sheetBinding.libraryUnreadOnlyFilter.setOnCheckedChangeListener { _, isChecked ->
+                DownloadViewModel.unreadOnlyFilter = isChecked
+                viewModel.resortAllData()
+            }
+
+            sheetBinding.libraryNotStartedOnlyFilter.setOnCheckedChangeListener { _, isChecked ->
+                DownloadViewModel.notStartedOnlyFilter = isChecked
+                viewModel.resortAllData()
+            }
+
+            sheetBinding.libraryCompletedOnlyFilter.setOnCheckedChangeListener { _, isChecked ->
+                DownloadViewModel.completedOnlyFilter = isChecked
+                viewModel.resortAllData()
+            }
+
             bottomSheetDialog.show()
         }
         /*

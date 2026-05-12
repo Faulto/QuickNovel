@@ -215,6 +215,9 @@
     <string name="filter_dialog_order_by">Ordenar por:</string>
     <string name="filter_dialog_general">General</string>
     <string name="filter_dialog_genre">Género</string>
+    <string name="library_filter_unread_only">Solo sin leer</string>
+    <string name="library_filter_not_started">No iniciado</string>
+    <string name="library_filter_completed_only">Solo novelas completadas</string>
     <string name="mainpage_sort_by_button_text">Ordenar</string>
     <string name="sort_apply">Aplicar</string>
     <string name="sort_cancel">Cancelar</string>
@@ -232,6 +235,7 @@
     <string name="download_perc_lh">Descargado (menor a mayor)</string>
     <string name="recently_updated_sort">Actualizado recientemente</string>
     <string name="chapter_sort">Capítulo</string>
+    <string name="unread_chapter_sort">Capítulos sin leer</string>
 
     <!-- Errores y Estados -->
     <string name="loading">Cargando…</string>

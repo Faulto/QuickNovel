@@ -45,7 +45,7 @@ object LibraryProgress {
     }
 
     fun readCount(cached: ResultCached): Int {
-        return cached.lastChapterRead.coerceAtLeast(0)
+        return maxOf(cached.lastChapterRead, readCountForNovelName(cached.name)).coerceAtLeast(0)
     }
 
     fun readCountForNovelName(name: String): Int {
@@ -69,5 +69,37 @@ object LibraryProgress {
 
     fun isCompletedLike(cached: ResultCached): Boolean {
         return isCompletedLike(cached.status, cached.lastChapterName)
+    }
+
+    fun matchesFilters(
+        totalChapters: Int,
+        readCount: Int,
+        status: String?,
+        lastChapterName: String?,
+        unreadOnly: Boolean,
+        notStartedOnly: Boolean,
+        completedOnly: Boolean
+    ): Boolean {
+        if (unreadOnly && !hasUnread(totalChapters, readCount)) return false
+        if (notStartedOnly && !isNotStarted(readCount)) return false
+        if (completedOnly && !isCompletedLike(status, lastChapterName)) return false
+        return true
+    }
+
+    fun matchesFilters(
+        cached: ResultCached,
+        unreadOnly: Boolean,
+        notStartedOnly: Boolean,
+        completedOnly: Boolean
+    ): Boolean {
+        return matchesFilters(
+            totalChapters = cached.currentTotalChapters,
+            readCount = readCount(cached),
+            status = cached.status,
+            lastChapterName = cached.lastChapterName,
+            unreadOnly = unreadOnly,
+            notStartedOnly = notStartedOnly,
+            completedOnly = completedOnly
+        )
     }
 }

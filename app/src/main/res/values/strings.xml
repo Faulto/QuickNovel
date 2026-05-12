@@ -74,6 +74,9 @@
     <string name="filter_dialog_general">General</string>
     <string name="filter_dialog_order_by">Order by</string>
     <string name="filter_dialog_genre">Genre</string>
+    <string name="library_filter_unread_only">Unread only</string>
+    <string name="library_filter_not_started">Not started</string>
+    <string name="library_filter_completed_only">Completed novels only</string>
     <string name="browse_list_icon">Icon</string>
     <string name="home_title_text">Explore</string>
     <string name="mainpage_filter">Filter</string>
@@ -234,6 +237,7 @@
     <string name="download_perc">Download percentage</string>
     <string name="recently_updated_sort">Recently updated</string>
     <string name="chapter_sort">Chapter</string>
+    <string name="unread_chapter_sort">Unread chapters</string>
 
     <string name="alpha_sort_az">Alphabetical (A-Z)</string>
     <string name="alpha_sort_za">Alphabetical (Z-A)</string>
