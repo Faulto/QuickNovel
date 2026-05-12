@@ -28,6 +28,7 @@ import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_CHAPTER
 import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_READ_AT
 import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_SCROLL_CHAR
 import com.lagradost.quicknovel.HISTORY_FOLDER
+import com.lagradost.quicknovel.LIBRARY_LAST_READ_ID
 import com.lagradost.quicknovel.LoadResponse
 import com.lagradost.quicknovel.PreferenceDelegate
 import com.lagradost.quicknovel.R
@@ -287,6 +288,7 @@ class ResultViewModel : ViewModel() {
         loadMutex.withLock {
             if (!hasLoaded) return@launchSafe
             addToHistory()
+            setKey(LIBRARY_LAST_READ_ID, loadId)
             BookDownloader2.readEpub(
                 loadId,
                 downloadState.value?.progress?.toInt() ?: return@launchSafe,
@@ -321,6 +323,7 @@ class ResultViewModel : ViewModel() {
         loadMutex.withLock {
             if (!hasLoaded) return@ioSafe
             addToHistory()
+            setKey(LIBRARY_LAST_READ_ID, loadId)
 
             chapter?.let {
                 // TODO BETTER STORE

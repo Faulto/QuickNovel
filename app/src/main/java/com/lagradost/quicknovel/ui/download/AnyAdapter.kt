@@ -23,6 +23,7 @@ import com.lagradost.quicknovel.ui.BaseDiffCallback
 import com.lagradost.quicknovel.ui.NoStateAdapter
 import com.lagradost.quicknovel.ui.ViewHolderState
 import com.lagradost.quicknovel.ui.newSharedPool
+import com.lagradost.quicknovel.util.LibraryProgress
 import com.lagradost.quicknovel.util.ResultCached
 import com.lagradost.quicknovel.util.SettingsHelper.getDownloadIsCompact
 import com.lagradost.quicknovel.util.UIHelper.hideKeyboard
@@ -175,13 +176,17 @@ class AnyAdapter(
             is HistoryResultCompactBinding -> {
                 val card = item as ResultCached
                 view.apply {
+                    val readCount = LibraryProgress.readCount(card)
+                    val unreadCount = LibraryProgress.unreadCount(card)
                     imageText.text = card.name
                     historyExtraText.text =
-                        "${card.lastChapterRead}/${card.currentTotalChapters} ${
+                        "$readCount/${card.currentTotalChapters} ${
                             root.context.getString(
                                 R.string.read_action_chapters
                             )
                         }"
+                    unreadBadge.text = unreadCount.toString()
+                    unreadBadge.isVisible = unreadCount > 0
 
                     imageView.setImage(card.poster)
 
@@ -241,6 +246,7 @@ class AnyAdapter(
                             imageTextMore.text = "+$diff "
                             imageTextMore.isVisible =
                                 diff > 0 && !showDownloadLoading && !item.isImported
+                            unreadBadge.isVisible = false
                             imageText.text = item.name
 
                             imageView.alpha = if (isAPdfDownloading) 0.6f else 1.0f
@@ -252,6 +258,8 @@ class AnyAdapter(
 
                     is ResultCached -> {
                         view.apply {
+                            val readCount = LibraryProgress.readCount(item)
+                            val unreadCount = LibraryProgress.unreadCount(item)
                             backgroundCard.apply {
                                 val coverHeight: Int = (resView.itemWidth / 0.68).roundToInt()
                                 layoutParams = LinearLayout.LayoutParams(
@@ -273,9 +281,11 @@ class AnyAdapter(
 
                             imageText.text = item.name
                             imageTextMore.isVisible = false
+                            unreadBadge.text = unreadCount.toString()
+                            unreadBadge.isVisible = unreadCount > 0
 
                             progressReading.text =
-                                "${item.lastChapterRead}/${item.currentTotalChapters}"
+                                "$readCount/${item.currentTotalChapters}"
                         }
                     }
 

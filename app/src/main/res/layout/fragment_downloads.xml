@@ -1,12 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
         xmlns:app="http://schemas.android.com/apk/res-auto"
         xmlns:tools="http://schemas.android.com/tools"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:id="@+id/downloadRoot"
-        android:background="?attr/primaryGrayBackground"
-        android:orientation="vertical">
+        android:background="?attr/primaryGrayBackground">
+
+    <ImageView
+            android:id="@+id/download_poster_blur"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:alpha="0.22"
+            android:background="?attr/primaryBlackBackground"
+            android:contentDescription="@string/background_image_descript"
+            android:scaleType="centerCrop"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
+    <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
 
     <FrameLayout
             android:visibility="visible"
@@ -26,6 +41,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:layout_gravity="center_vertical"
+                android:layout_marginEnd="40dp"
                 app:iconifiedByDefault="false"
                 tools:ignore="RtlSymmetry">
 
@@ -34,6 +50,17 @@
                         app:searchHintIcon="@drawable/search_white"
                         -->
         </androidx.appcompat.widget.SearchView>
+
+        <ImageView
+                android:id="@+id/download_import_button"
+                android:layout_width="25dp"
+                android:layout_height="25dp"
+                android:layout_gravity="end|center_vertical"
+                android:layout_margin="10dp"
+                android:background="?selectableItemBackgroundBorderless"
+                android:contentDescription="@string/import_epub"
+                android:src="@drawable/ic_baseline_menu_book_24"
+                app:tint="?attr/white" />
     </FrameLayout>
 
     <!--<com.google.android.material.appbar.AppBarLayout
@@ -81,7 +108,7 @@
             android:layout_height="wrap_content">
 
         <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-                android:background="?attr/primaryBlackBackground"
+                android:background="@color/transparent"
                 android:id="@+id/swipe_container"
                 android:layout_width="match_parent"
                 app:layout_behavior="@string/appbar_scrolling_view_behavior"
@@ -135,4 +162,5 @@
                 android:layout_marginEnd="16dp"
                 android:layout_marginBottom="56dp" />
     </FrameLayout>
-</LinearLayout>
+    </LinearLayout>
+</FrameLayout>

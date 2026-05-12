@@ -38,6 +38,27 @@
                     android:contentDescription="@string/poster_open_source_descript" />
         </androidx.cardview.widget.CardView>
 
+        <TextView
+                android:id="@+id/unreadBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|start"
+                android:layout_marginStart="5dp"
+                android:layout_marginTop="5dp"
+                android:background="@drawable/unread_badge_background"
+                android:gravity="center"
+                android:minWidth="26dp"
+                android:paddingStart="6dp"
+                android:paddingTop="3dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="3dp"
+                android:textColor="?attr/primaryBlackBackground"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:visibility="gone"
+                tools:text="12"
+                tools:visibility="visible" />
+
         <FrameLayout
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"

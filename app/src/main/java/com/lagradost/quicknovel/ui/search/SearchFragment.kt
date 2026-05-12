@@ -15,6 +15,7 @@ import androidx.recyclerview.widget.GridLayoutManager
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.lagradost.quicknovel.CommonActivity.activity
 import com.lagradost.quicknovel.HomePageList
+import com.lagradost.quicknovel.MainActivity
 import com.lagradost.quicknovel.databinding.FragmentSearchBinding
 import com.lagradost.quicknovel.databinding.HomeEpisodesExpandedBinding
 import com.lagradost.quicknovel.mvvm.Resource
@@ -172,6 +173,10 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
 
         binding.searchFilter.setOnClickListener {
             SettingsFragment.showSearchProviders(it.context)
+        }
+
+        binding.searchImportButton.setOnClickListener {
+            MainActivity.importEpub()
         }
 
         binding.mainSearch.setOnQueryTextListener(object : SearchView.OnQueryTextListener {

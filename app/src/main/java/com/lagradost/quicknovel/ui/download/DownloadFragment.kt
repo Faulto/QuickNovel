@@ -28,12 +28,14 @@ import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.databinding.FragmentDownloadsBinding
 import com.lagradost.quicknovel.databinding.SortBottomSheetBinding
 import com.lagradost.quicknovel.mvvm.observe
+import com.lagradost.quicknovel.mvvm.observeNullable
 import com.lagradost.quicknovel.ui.BaseFragment
 import com.lagradost.quicknovel.ui.SortingMethodAdapter
 import com.lagradost.quicknovel.ui.UiImage
 import com.lagradost.quicknovel.ui.img
 import com.lagradost.quicknovel.util.UIHelper.colorFromAttribute
 import com.lagradost.quicknovel.util.UIHelper.fixPaddingStatusbar
+import com.lagradost.quicknovel.util.UIHelper.setImage
 import kotlinx.coroutines.launch
 
 class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
@@ -157,6 +159,9 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
             }
         })
 
+        binding.downloadImportButton.setOnClickListener {
+            viewModel.importEpub()
+        }
 
         val adapter = ViewpagerAdapter(viewModel, this) { isScrollingDown ->
             if (isScrollingDown)
@@ -172,6 +177,11 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
                     binding.viewpager.setCurrentItem(it, false)
                 }
             }
+        }
+
+        observeNullable(viewModel.libraryBackground) { image ->
+            binding.downloadPosterBlur.isVisible =
+                binding.downloadPosterBlur.setImage(image, radius = 100, sample = 3)
         }
 
         binding.viewpager.adapter = adapter

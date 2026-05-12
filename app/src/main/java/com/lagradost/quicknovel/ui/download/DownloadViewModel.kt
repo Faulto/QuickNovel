@@ -39,6 +39,7 @@ import com.lagradost.quicknovel.DownloadFileWorkManager
 import com.lagradost.quicknovel.DownloadFileWorkManager.Companion.viewModel
 import com.lagradost.quicknovel.DownloadProgressState
 import com.lagradost.quicknovel.DownloadState
+import com.lagradost.quicknovel.LIBRARY_LAST_READ_ID
 import com.lagradost.quicknovel.MainActivity
 import com.lagradost.quicknovel.MainActivity.Companion.loadResult
 import com.lagradost.quicknovel.PreferenceDelegate
@@ -50,6 +51,7 @@ import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.launchSafe
 import com.lagradost.quicknovel.mvvm.logError
 import com.lagradost.quicknovel.ui.ReadType
+import com.lagradost.quicknovel.ui.UiImage
 import com.lagradost.quicknovel.util.Apis.Companion.getApiFromNameOrNull
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
 import com.lagradost.quicknovel.util.LibraryProgress
@@ -158,6 +160,8 @@ class DownloadViewModel : ViewModel() {
     var currentTab: MutableLiveData<Int> =
         MutableLiveData<Int>(getKey(DOWNLOAD_SETTINGS, CURRENT_TAB, 0))
 
+    val libraryBackground: MutableLiveData<UiImage?> = MutableLiveData(null)
+
     fun switchPage(position: Int) {
         setKey(DOWNLOAD_SETTINGS, CURRENT_TAB, position)
         currentTab.postValue(position)
@@ -180,6 +184,8 @@ class DownloadViewModel : ViewModel() {
     }
 
     fun stream(card: ResultCached) {
+        setKey(LIBRARY_LAST_READ_ID, card.id)
+        libraryBackground.postValue(card.image)
         BookDownloader2.stream(card)
     }
 
@@ -204,6 +210,8 @@ class DownloadViewModel : ViewModel() {
             )
         } finally {
             setKey(DOWNLOAD_EPUB_LAST_ACCESS, card.id.toString(), System.currentTimeMillis())
+            setKey(LIBRARY_LAST_READ_ID, card.id)
+            libraryBackground.postValue(card.image)
             cardsDataMutex.withLock {
                 cardsData[card.id] = cardsData[card.id]?.copy(generating = false) ?: return@withLock
             }
@@ -535,6 +543,7 @@ class DownloadViewModel : ViewModel() {
             )
         }
         _pages.postValue(pages)
+        updateLibraryBackground(mapping.values.flatten())
 
 
     }
@@ -557,6 +566,25 @@ class DownloadViewModel : ViewModel() {
                 list[0] = getDownloadedCards()
             }
             _pages.postValue(list)
+            updateLibraryBackground()
+        }
+    }
+
+    private suspend fun updateLibraryBackground(bookmarks: Collection<ResultCached> = emptyList()) {
+        val lastReadId = getKey<Int>(LIBRARY_LAST_READ_ID)
+        if (lastReadId == null) {
+            libraryBackground.postValue(null)
+            return
+        }
+
+        val downloadedImage = cardsDataMutex.withLock {
+            cardsData[lastReadId]?.image
+        }
+        val bookmarkedImage = bookmarks.firstOrNull { card -> card.id == lastReadId }?.image
+        val image = downloadedImage ?: bookmarkedImage
+
+        if (image != null || bookmarks.isNotEmpty()) {
+            libraryBackground.postValue(image)
         }
     }
 

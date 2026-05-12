@@ -64,7 +64,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="30dp"
                     android:layout_gravity="center_vertical"
-                    android:layout_marginEnd="30dp">
+                    android:layout_marginEnd="70dp">
 
                     <androidx.appcompat.widget.SearchView
                         android:id="@+id/main_search"
@@ -97,6 +97,18 @@
                                     -->
                     </androidx.appcompat.widget.SearchView>
                 </FrameLayout>
+
+                <ImageView
+                    android:id="@+id/search_import_button"
+                    android:layout_width="25dp"
+                    android:layout_height="25dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:layout_margin="10dp"
+                    android:layout_marginEnd="45dp"
+                    android:background="?selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/import_epub"
+                    android:src="@drawable/ic_baseline_menu_book_24"
+                    app:tint="?attr/white" />
 
                 <ImageView
                     android:id="@+id/search_filter"
