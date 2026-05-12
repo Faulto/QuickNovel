@@ -456,6 +456,76 @@ object BookDownloader2Helper {
         }
     }
 
+    fun countCachedChapters(
+        context: Context?,
+        author: String?,
+        name: String,
+        apiName: String,
+        total: Int
+    ): DownloadProgress? {
+        if (context == null || total <= 0) return null
+
+        try {
+            val sApiname = sanitizeFilename(apiName)
+            val sAuthor = if (author == null) "" else sanitizeFilename(author)
+            val sName = sanitizeFilename(name)
+            val id = generateId(apiName, author, name)
+
+            val directory = File(
+                context.filesDir.toString() + getDirectory(
+                    sApiname,
+                    sAuthor,
+                    sName
+                )
+            )
+
+            val epub = File(directory, LOCAL_EPUB)
+            val (progress, downloaded) = if (epub.exists()) {
+                if (sApiname == IMPORT_SOURCE_PDF) {
+                    val tempFolder = File(context.cacheDir, "temp_$id")
+                    val xhtmlCount = tempFolder.listFiles { _, fileName ->
+                        fileName.endsWith(".xhtml", ignoreCase = true)
+                    }?.size ?: total
+                    xhtmlCount.coerceAtMost(total) to xhtmlCount.coerceAtMost(total)
+                } else if (epub.length() > LOCAL_EPUB_MIN_SIZE) {
+                    total to total
+                } else {
+                    0 to 0
+                }
+            } else {
+                val existingFiles = directory
+                    .listFiles()
+                    ?.mapNotNull { it.nameWithoutExtension.toIntOrNull() }
+                    ?.sorted()
+
+                if (existingFiles.isNullOrEmpty()) {
+                    0 to 0
+                } else {
+                    val start = getKey<Int>(DOWNLOAD_OFFSET, id.toString()) ?: 0
+                    val firstIndex = existingFiles.indexOfFirst { it >= start }.let { index ->
+                        if (index == -1) 0 else index
+                    }
+                    var lastContinuous = existingFiles[firstIndex]
+                    for (i in firstIndex + 1 until existingFiles.size) {
+                        if (existingFiles[i] == lastContinuous + 1) {
+                            lastContinuous = existingFiles[i]
+                        } else {
+                            break
+                        }
+                    }
+
+                    (lastContinuous + 1).coerceAtMost(total) to existingFiles.size.coerceAtMost(total)
+                }
+            }
+
+            if (progress <= 0) return null
+            setKey(DOWNLOAD_SIZE, id.toString(), progress)
+            return DownloadProgress(progress.toLong(), total.toLong(), downloaded.toLong())
+        } catch (e: Exception) {
+            return null
+        }
+    }
+
     fun openQuickStream(activity: Activity?, uri: Uri?) {
         if (uri == null || activity == null) return
         val myIntent = Intent(activity, ReadActivity2::class.java)
@@ -646,6 +716,10 @@ object BookDownloader2Helper {
         forceReload: Boolean = false,
         maxTries: Int = 5
     ): Boolean = withContext(Dispatchers.IO) {
+        if (data.url.isBlank()) {
+            return@withContext false
+        }
+
         val rFile = File(filepath)
         if (rFile.exists() && rFile.length() > 0 && !forceReload) {
             return@withContext true
