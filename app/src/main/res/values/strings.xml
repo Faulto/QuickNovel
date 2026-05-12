@@ -120,6 +120,7 @@
     <string name="type_dropped">Dropped</string>
     <string name="type_plan_to_read">Plan to Read</string>
     <string name="type_none">None</string>
+    <string name="type_trash">Trash</string>
     <string name="has_read">Has read</string>
 
     <string name="read_display_settings">Settings</string>

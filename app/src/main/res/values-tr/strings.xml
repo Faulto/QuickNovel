@@ -95,6 +95,7 @@
     <string name="type_dropped">Terk Edildi</string>
     <string name="type_plan_to_read">Okumayı Planla</string>
     <string name="type_none">Hiçbiri</string>
+    <string name="type_trash">Çöp Kutusu</string>
 
     <string name="read_display_settings">Ayarlar</string>
     <string name="read_text_size">Metin</string>
