@@ -59,7 +59,7 @@ This changes cached result loading to avoid placeholder chapters and skips empty
 - `Unread only` should mean entries with at least one unread chapter.
 - Add a separate `Not started` toggle for entries with zero chapters read.
 - Completed filtering should use provider completed status OR final/end chapter-title heuristics.
-- Unread badges should be limited to the Library page, not search/home surfaces.
+- Unread badge overlays should be dropped because upstream already shows Library progress on grid cards.
 - The library background should be based on the last read novel, not metadata refresh time.
 - Toolbar import buttons should be kept.
 - `.idea` files should be dropped.
@@ -190,14 +190,14 @@ Observed changes:
 - Adds `unreadBadge` views to library/history/search grid card layouts.
 - `AnyAdapter` and `HomeChildItemAdapter2` asynchronously compute unread counts and show badges.
 
-Keep: yes, but reshape.
+Keep: no, not as a separate overlay.
 
 How to keep it:
 
-- Limit unread badges to the Library page.
+- Keep the shared unread/read calculations for filters and sorting.
+- Keep upstream's existing Library card progress display as the single grid indicator.
 - Do not port the search/home unread badge surface from `HomeChildItemAdapter2`.
-- Keep badge resources, but adapt them to upstream's existing `progressReading` overlay in `download_result_grid.xml`.
-- Avoid adding a second badge that duplicates upstream's existing `lastChapterRead/currentTotalChapters` display unless the UI clearly benefits.
+- Do not keep `unreadBadge` views or `unread_badge_background.xml`, because they duplicate upstream's progress overlay.
 
 Risk:
 
@@ -392,7 +392,7 @@ Reason:
 7. Port cached chapter counting and empty URL guard.
 8. Port result-page read/download progress UI.
 9. Port library unread/not-started/completed filters and unread sort.
-10. Port Library unread badges, reconciling with upstream's existing reading-progress labels.
+10. Drop separate Library unread badge overlays; keep upstream's existing reading-progress labels.
 11. Port last-read blurred library background.
 12. Port toolbar import buttons.
 13. Update README after implementation is verified, if still useful.
@@ -413,7 +413,7 @@ Keep:
 - Trash category.
 - Library unread/not-started/completed filters.
 - Sort by unread chapters.
-- Unread/read progress surfaces.
+- Upstream Library read-progress surfaces.
 - Cached result/offline result loading.
 - Cached chapter counting.
 - Empty chapter URL guard.
@@ -421,7 +421,6 @@ Keep:
 
 Keep but reshape:
 
-- Library unread badges.
 - Toolbar import buttons.
 - README feature notes.
 

@@ -177,7 +177,6 @@ class AnyAdapter(
                 val card = item as ResultCached
                 view.apply {
                     val readCount = LibraryProgress.readCount(card)
-                    val unreadCount = LibraryProgress.unreadCount(card)
                     imageText.text = card.name
                     historyExtraText.text =
                         "$readCount/${card.currentTotalChapters} ${
@@ -185,8 +184,6 @@ class AnyAdapter(
                                 R.string.read_action_chapters
                             )
                         }"
-                    unreadBadge.text = unreadCount.toString()
-                    unreadBadge.isVisible = unreadCount > 0
 
                     imageView.setImage(card.poster)
 
@@ -246,7 +243,6 @@ class AnyAdapter(
                             imageTextMore.text = "+$diff "
                             imageTextMore.isVisible =
                                 diff > 0 && !showDownloadLoading && !item.isImported
-                            unreadBadge.isVisible = false
                             imageText.text = item.name
 
                             imageView.alpha = if (isAPdfDownloading) 0.6f else 1.0f
@@ -259,7 +255,6 @@ class AnyAdapter(
                     is ResultCached -> {
                         view.apply {
                             val readCount = LibraryProgress.readCount(item)
-                            val unreadCount = LibraryProgress.unreadCount(item)
                             backgroundCard.apply {
                                 val coverHeight: Int = (resView.itemWidth / 0.68).roundToInt()
                                 layoutParams = LinearLayout.LayoutParams(
@@ -281,8 +276,6 @@ class AnyAdapter(
 
                             imageText.text = item.name
                             imageTextMore.isVisible = false
-                            unreadBadge.text = unreadCount.toString()
-                            unreadBadge.isVisible = unreadCount > 0
 
                             progressReading.text =
                                 "$readCount/${item.currentTotalChapters}"

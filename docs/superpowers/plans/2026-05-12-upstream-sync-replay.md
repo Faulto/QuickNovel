@@ -23,9 +23,9 @@
 - Modify `app/src/main/java/com/lagradost/quicknovel/ui/result/ChapterAdapter.kt`: chapter zebra striping.
 - Modify `app/src/main/java/com/lagradost/quicknovel/ui/download/DownloadViewModel.kt`: Trash tab, unread/not-started/completed filters, unread sort, refresh integration.
 - Modify `app/src/main/java/com/lagradost/quicknovel/ui/download/DownloadFragment.kt`: toolbar import button, last-read background, filter switches.
-- Modify `app/src/main/java/com/lagradost/quicknovel/ui/download/AnyAdapter.kt`: Library unread badges only.
+- Modify `app/src/main/java/com/lagradost/quicknovel/ui/download/AnyAdapter.kt`: keep Library read-progress labels and avoid duplicate unread badges.
 - Modify `app/src/main/java/com/lagradost/quicknovel/ui/search/SearchFragment.kt`: toolbar import button only, no search/home unread badges.
-- Modify XML resources under `app/src/main/res/layout`, `app/src/main/res/values`, `app/src/main/res/color`, and `app/src/main/res/drawable`: default fork styling, Library badge, result progress UI, sort toggles, strings.
+- Modify XML resources under `app/src/main/res/layout`, `app/src/main/res/values`, `app/src/main/res/color`, and `app/src/main/res/drawable`: default fork styling, Library progress UI, result progress UI, sort toggles, strings.
 - Drop `.idea` changes by starting from upstream and not replaying those files.
 
 ## Task 1: Branch From Upstream And Preserve Docs
@@ -92,9 +92,9 @@
 - [ ] Run `./gradlew assembleDebug`.
 - [ ] Commit with `feat: restore fork library filters`.
 
-## Task 7: Library Badges, Import Buttons, And Last-Read Background
+## Task 7: Library Progress, Import Buttons, And Last-Read Background
 
-- [ ] Add Library unread badges in `AnyAdapter.kt` and Library card layouts only.
+- [ ] Keep upstream Library read-progress labels and do not add duplicate unread badge overlays.
 - [ ] Do not port search/home unread badge adapter logic.
 - [ ] Add toolbar import buttons to Search and Library.
 - [ ] Track true last-read novel and load it as the Library blurred background.
