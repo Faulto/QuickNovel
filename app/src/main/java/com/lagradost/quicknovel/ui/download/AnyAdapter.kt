@@ -23,7 +23,6 @@ import com.lagradost.quicknovel.ui.BaseDiffCallback
 import com.lagradost.quicknovel.ui.NoStateAdapter
 import com.lagradost.quicknovel.ui.ViewHolderState
 import com.lagradost.quicknovel.ui.newSharedPool
-import com.lagradost.quicknovel.util.LibraryProgress
 import com.lagradost.quicknovel.util.ResultCached
 import com.lagradost.quicknovel.util.SettingsHelper.getDownloadIsCompact
 import com.lagradost.quicknovel.util.UIHelper.hideKeyboard
@@ -176,7 +175,7 @@ class AnyAdapter(
             is HistoryResultCompactBinding -> {
                 val card = item as ResultCached
                 view.apply {
-                    val readCount = LibraryProgress.readCount(card)
+                    val readCount = card.lastChapterRead.coerceAtLeast(0)
                     imageText.text = card.name
                     historyExtraText.text =
                         "$readCount/${card.currentTotalChapters} ${
@@ -254,7 +253,7 @@ class AnyAdapter(
 
                     is ResultCached -> {
                         view.apply {
-                            val readCount = LibraryProgress.readCount(item)
+                            val readCount = item.lastChapterRead.coerceAtLeast(0)
                             backgroundCard.apply {
                                 val coverHeight: Int = (resView.itemWidth / 0.68).roundToInt()
                                 layoutParams = LinearLayout.LayoutParams(

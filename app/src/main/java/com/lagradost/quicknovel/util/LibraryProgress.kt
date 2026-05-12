@@ -48,6 +48,10 @@ object LibraryProgress {
         return maxOf(cached.lastChapterRead, readCountForNovelName(cached.name)).coerceAtLeast(0)
     }
 
+    fun readCount(cached: ResultCached, readCounts: Map<String, Int>): Int {
+        return maxOf(cached.lastChapterRead, readCounts[cached.name] ?: 0).coerceAtLeast(0)
+    }
+
     fun readCountForNovelName(name: String): Int {
         val prefix = "$EPUB_CURRENT_POSITION_READ_AT/$name/"
         return getKeys(EPUB_CURRENT_POSITION_READ_AT)
@@ -55,8 +59,30 @@ object LibraryProgress {
             ?: 0
     }
 
+    fun readCountSnapshot(keys: Collection<String>): Map<String, Int> {
+        val prefix = "$EPUB_CURRENT_POSITION_READ_AT/"
+        return keys.asSequence()
+            .filter { key -> key.startsWith(prefix) }
+            .mapNotNull { key ->
+                val path = key.removePrefix(prefix)
+                val novelName = path.substringBeforeLast('/', missingDelimiterValue = "")
+                val chapterIndex = path.substringAfterLast('/', missingDelimiterValue = "")
+                novelName.takeIf { it.isNotBlank() && chapterIndex.toIntOrNull() != null }
+            }
+            .groupingBy { it }
+            .eachCount()
+    }
+
+    fun readCountSnapshot(): Map<String, Int> {
+        return readCountSnapshot(getKeys(EPUB_CURRENT_POSITION_READ_AT) ?: emptyList())
+    }
+
     fun unreadCount(cached: ResultCached): Int {
         return unreadCount(cached.currentTotalChapters, readCount(cached))
+    }
+
+    fun unreadCount(cached: ResultCached, readCounts: Map<String, Int>): Int {
+        return unreadCount(cached.currentTotalChapters, readCount(cached, readCounts))
     }
 
     fun hasUnread(cached: ResultCached): Boolean {
@@ -95,6 +121,24 @@ object LibraryProgress {
         return matchesFilters(
             totalChapters = cached.currentTotalChapters,
             readCount = readCount(cached),
+            status = cached.status,
+            lastChapterName = cached.lastChapterName,
+            unreadOnly = unreadOnly,
+            notStartedOnly = notStartedOnly,
+            completedOnly = completedOnly
+        )
+    }
+
+    fun matchesFilters(
+        cached: ResultCached,
+        readCounts: Map<String, Int>,
+        unreadOnly: Boolean,
+        notStartedOnly: Boolean,
+        completedOnly: Boolean
+    ): Boolean {
+        return matchesFilters(
+            totalChapters = cached.currentTotalChapters,
+            readCount = readCount(cached, readCounts),
             status = cached.status,
             lastChapterName = cached.lastChapterName,
             unreadOnly = unreadOnly,

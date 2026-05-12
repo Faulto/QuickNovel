@@ -67,4 +67,22 @@ class LibraryProgressTest {
             )
         )
     }
+
+    @Test
+    fun readCountSnapshotGroupsPersistedReadKeysByNovelName() {
+        val keys = listOf(
+            "reader_epub_position_read/Novel A/0",
+            "reader_epub_position_read/Novel A/1",
+            "reader_epub_position_read/Novel/With Slash/0",
+            "reader_epub_position_read/Novel/With Slash/3",
+            "reader_epub_position_read/Novel B/not-an-index",
+            "other_key/Novel A/2"
+        )
+
+        val snapshot = LibraryProgress.readCountSnapshot(keys)
+
+        assertEquals(2, snapshot["Novel A"])
+        assertEquals(2, snapshot["Novel/With Slash"])
+        assertFalse(snapshot.containsKey("Novel B"))
+    }
 }

@@ -429,6 +429,34 @@ class DownloadViewModel : ViewModel() {
         val newSortingMethod =
             getKey(DOWNLOAD_SETTINGS, DOWNLOAD_NORMAL_SORTING_METHOD) ?: DEFAULT_SORT
         setKey(DOWNLOAD_SETTINGS, DOWNLOAD_NORMAL_SORTING_METHOD, newSortingMethod)
+        val unreadOnly = unreadOnlyFilter
+        val notStartedOnly = notStartedOnlyFilter
+        val completedOnly = completedOnlyFilter
+        val hasFilters = unreadOnly || notStartedOnly || completedOnly
+        val needsReadCounts = unreadOnly || notStartedOnly ||
+                newSortingMethod == UNREAD_CHAPTER_SORT ||
+                newSortingMethod == REVERSE_UNREAD_CHAPTER_SORT
+        val readCounts = if (needsReadCounts) {
+            LibraryProgress.readCountSnapshot()
+        } else {
+            emptyMap()
+        }
+
+        fun readCount(card: ResultCached): Int {
+            return LibraryProgress.readCount(card, readCounts)
+        }
+
+        fun matchesFilters(card: ResultCached): Boolean {
+            if (unreadOnly || notStartedOnly) {
+                val count = readCount(card)
+                val total = card.currentTotalChapters
+                if (unreadOnly && !LibraryProgress.hasUnread(total, count)) return false
+                if (notStartedOnly && !LibraryProgress.isNotStarted(count)) return false
+            }
+
+            if (completedOnly && !LibraryProgress.isCompletedLike(card)) return false
+            return true
+        }
 
         return when (newSortingMethod) {
             ALPHA_SORT -> {
@@ -442,12 +470,16 @@ class DownloadViewModel : ViewModel() {
             }
 
             UNREAD_CHAPTER_SORT -> {
-                currentArray.sortByDescending { t -> LibraryProgress.unreadCount(t) }
+                currentArray.sortByDescending { t ->
+                    LibraryProgress.unreadCount(t.currentTotalChapters, readCount(t))
+                }
                 currentArray
             }
 
             REVERSE_UNREAD_CHAPTER_SORT -> {
-                currentArray.sortBy { t -> LibraryProgress.unreadCount(t) }
+                currentArray.sortBy { t ->
+                    LibraryProgress.unreadCount(t.currentTotalChapters, readCount(t))
+                }
                 currentArray
             }
 
@@ -473,12 +505,7 @@ class DownloadViewModel : ViewModel() {
                 currentArray
             }
         }.filter {
-            matchesQuery(it.name) && LibraryProgress.matchesFilters(
-                cached = it,
-                unreadOnly = unreadOnlyFilter,
-                notStartedOnly = notStartedOnlyFilter,
-                completedOnly = completedOnlyFilter
-            )
+            matchesQuery(it.name) && (!hasFilters || matchesFilters(it))
         }
     }
 
