@@ -1,5 +1,8 @@
 package com.lagradost.quicknovel.util
 
+import com.lagradost.quicknovel.BaseApplication.Companion.getKeys
+import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_READ_AT
+
 object LibraryProgress {
     private val completedChapterMarkers = listOf(
         "(end)",
@@ -43,6 +46,13 @@ object LibraryProgress {
 
     fun readCount(cached: ResultCached): Int {
         return cached.lastChapterRead.coerceAtLeast(0)
+    }
+
+    fun readCountForNovelName(name: String): Int {
+        val prefix = "$EPUB_CURRENT_POSITION_READ_AT/$name/"
+        return getKeys(EPUB_CURRENT_POSITION_READ_AT)
+            ?.count { it.startsWith(prefix) }
+            ?: 0
     }
 
     fun unreadCount(cached: ResultCached): Int {

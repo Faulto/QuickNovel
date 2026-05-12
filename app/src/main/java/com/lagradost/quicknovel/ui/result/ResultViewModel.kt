@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.lagradost.quicknovel.APIRepository
 import com.lagradost.quicknovel.BaseApplication.Companion.context
 import com.lagradost.quicknovel.BaseApplication.Companion.getKey
+import com.lagradost.quicknovel.BaseApplication.Companion.getKeys
 import com.lagradost.quicknovel.BaseApplication.Companion.removeKey
 import com.lagradost.quicknovel.BaseApplication.Companion.setKey
 import com.lagradost.quicknovel.BookDownloader2
@@ -37,6 +38,7 @@ import com.lagradost.quicknovel.RESULT_CHAPTER_FILTER_DOWNLOADED
 import com.lagradost.quicknovel.RESULT_CHAPTER_FILTER_READ
 import com.lagradost.quicknovel.RESULT_CHAPTER_FILTER_UNREAD
 import com.lagradost.quicknovel.RESULT_CHAPTER_SORT
+import com.lagradost.quicknovel.ReleaseStatus
 import com.lagradost.quicknovel.StreamResponse
 import com.lagradost.quicknovel.UserReview
 import com.lagradost.quicknovel.mvvm.Resource
@@ -52,6 +54,7 @@ import com.lagradost.quicknovel.ui.download.REVERSE_LAST_UPDATED_SORT
 import com.lagradost.quicknovel.ui.download.SortingMethod
 import com.lagradost.quicknovel.util.Apis
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
+import com.lagradost.quicknovel.util.LibraryProgress
 import com.lagradost.quicknovel.util.ResultCached
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -213,6 +216,7 @@ class ResultViewModel : ViewModel() {
     private var loadId: Int = 0
     private var loadUrl: String = ""
     private var hasLoaded: Boolean = false
+    private var cachedInitialResult: ResultCached? = null
 
     val loadResponse: MutableLiveData<Resource<LoadResponse>?> =
         MutableLiveData<Resource<LoadResponse>?>()
@@ -477,6 +481,7 @@ class ResultViewModel : ViewModel() {
         if (!isGetLoaded) return@launchSafe
         loadMutex.withLock {
             if (!hasLoaded) return@launchSafe
+            val streamData = (load as? StreamResponse)?.data
             setKey(
                 HISTORY_FOLDER, loadId.toString(), ResultCached(
                     loadUrl,
@@ -487,9 +492,11 @@ class ResultViewModel : ViewModel() {
                     load.posterUrl,
                     load.tags,
                     load.rating,
-                    (load as? StreamResponse)?.data?.size ?: 1,
+                    currentTotalChapters(),
                     System.currentTimeMillis(),
-                    synopsis = load.synopsis
+                    synopsis = load.synopsis,
+                    status = load.status?.name ?: cachedInitialResult?.status,
+                    lastChapterName = streamData?.lastOrNull()?.name ?: cachedInitialResult?.lastChapterName
                 )
             )
         }
@@ -537,7 +544,10 @@ class ResultViewModel : ViewModel() {
         if (!isGetLoaded && getKey<ResultCached>(RESULT_BOOKMARK, loadId.toString()) != null) {
             return
         }
-        val totalChapters = (load as? StreamResponse)?.data?.size ?: 1
+        val streamData = (load as? StreamResponse)?.data
+        if (isGetLoaded && cachedInitialResult != null && streamData.isNullOrEmpty()) {
+            return
+        }
         setKey(
             RESULT_BOOKMARK, loadId.toString(), ResultCached(
                 loadUrl,
@@ -548,9 +558,11 @@ class ResultViewModel : ViewModel() {
                 load.posterUrl,
                 load.tags,
                 load.rating,
-                totalChapters,
+                currentTotalChapters(),
                 System.currentTimeMillis(),
-                synopsis = load.synopsis
+                synopsis = load.synopsis,
+                status = load.status?.name ?: cachedInitialResult?.status,
+                lastChapterName = streamData?.lastOrNull()?.name ?: cachedInitialResult?.lastChapterName
             )
         )
     }
@@ -605,6 +617,20 @@ class ResultViewModel : ViewModel() {
     }
     private var downloadStateValue: DownloadProgressState? = null
 
+    val readCount: MutableLiveData<Int> by lazy {
+        MutableLiveData(0)
+    }
+
+    private fun currentTotalChapters(): Int {
+        val streamCount = (load as? StreamResponse)?.data?.size
+        if (streamCount != null && streamCount > 0) return streamCount
+        return cachedInitialResult?.totalChapters ?: 1
+    }
+
+    private fun updateReadCount() {
+        readCount.postValue(LibraryProgress.readCountForNovelName(load.name))
+    }
+
     fun setDownloadState(state: DownloadProgressState) {
         downloadStateValue = state
         downloadState.postValue(state)
@@ -644,12 +670,21 @@ class ResultViewModel : ViewModel() {
                 if (current != null) {
                     setDownloadState(current)
                 } else {
-                    BookDownloader2Helper.downloadInfo(
+                    val total = currentTotalChapters()
+                    val info = BookDownloader2Helper.downloadInfo(
                         context,
                         load.author,
                         load.name,
                         load.apiName
-                    )?.let { info ->
+                    ) ?: BookDownloader2Helper.countCachedChapters(
+                        context,
+                        load.author,
+                        load.name,
+                        load.apiName,
+                        total
+                    )
+
+                    if (info != null) {
                         val new = DownloadProgressState(
                             state = DownloadState.Nothing,
                             progress = info.progress,
@@ -660,11 +695,11 @@ class ResultViewModel : ViewModel() {
                         )
                         downloadProgress[loadId] = new
                         setDownloadState(new)
-                    } ?: run {
+                    } else {
                         val new = DownloadProgressState(
                             state = DownloadState.Nothing,
                             progress = 0,
-                            total = (load as? StreamResponse)?.data?.size?.toLong() ?: 1,
+                            total = total.toLong(),
                             downloaded = 0,
                             lastUpdatedMs = System.currentTimeMillis(),
                             etaMs = null
@@ -692,9 +727,13 @@ class ResultViewModel : ViewModel() {
                 rating = card.rating,
                 synopsis = card.synopsis,
                 tags = card.tags,
-                apiName = card.apiName
+                apiName = card.apiName,
+                status = card.status?.let { storedStatus ->
+                    runCatching { ReleaseStatus.valueOf(storedStatus) }.getOrNull()
+                }
             )
 
+            cachedInitialResult = card
             load = data
             loadResponse.postValue(Resource.Success(data))
             setState(card.id)
@@ -722,6 +761,7 @@ class ResultViewModel : ViewModel() {
 
         // insert a download progress if not found
         insertZeroData()
+        updateReadCount()
     }
 
     fun initState(card: DownloadFragment.DownloadDataLoaded) = viewModelScope.launch {
@@ -744,6 +784,7 @@ class ResultViewModel : ViewModel() {
                 tags = card.tags,
                 apiName = card.apiName
             )
+            cachedInitialResult = null
             load = data
             loadResponse.postValue(Resource.Success(data))
             setState(card.id)
@@ -752,12 +793,24 @@ class ResultViewModel : ViewModel() {
 
     fun initState(apiName: String, url: String) = viewModelScope.launch {
         isGetLoaded = true
-        loadResponse.postValue(Resource.Loading(url))
 
         loadMutex.withLock {
             this@ResultViewModel.apiName = apiName
             repo = Apis.getApiFromNameOrNull(apiName)
             loadUrl = url
+        }
+
+        val cached = findCachedResult(apiName, url)
+        if (cached != null) {
+            loadMutex.withLock {
+                cachedInitialResult = cached
+                load = cached.toStreamResponse()
+                loadUrl = cached.source
+                loadResponse.postValue(Resource.Success(load))
+                setState(cached.id)
+            }
+        } else {
+            loadResponse.postValue(Resource.Loading(url))
         }
 
         val data = repo?.load(url)
@@ -768,14 +821,47 @@ class ResultViewModel : ViewModel() {
 
                     load = res
                     loadUrl = res.url
+                    cachedInitialResult = null
 
                     val tid = generateId(res, apiName)
                     setState(tid)
+                    loadResponse.postValue(Resource.Success(res))
                 }
 
-                else -> {}
+                else -> {
+                    if (cached == null) {
+                        loadResponse.postValue(data)
+                    }
+                }
             }
-            loadResponse.postValue(data)
         }
+    }
+
+    private fun findCachedResult(apiName: String, url: String): ResultCached? {
+        fun findInFolder(folder: String): ResultCached? {
+            return getKeys(folder)?.firstNotNullOfOrNull { key ->
+                getKey<ResultCached>(key)
+                    ?.takeIf { cached -> cached.apiName == apiName && cached.source == url }
+            }
+        }
+
+        return findInFolder(RESULT_BOOKMARK) ?: findInFolder(HISTORY_FOLDER)
+    }
+
+    private fun ResultCached.toStreamResponse(): StreamResponse {
+        return StreamResponse(
+            url = source,
+            name = name,
+            data = emptyList(),
+            author = author,
+            posterUrl = poster,
+            rating = rating,
+            synopsis = synopsis,
+            tags = tags,
+            apiName = apiName,
+            status = status?.let { storedStatus ->
+                runCatching { ReleaseStatus.valueOf(storedStatus) }.getOrNull()
+            }
+        )
     }
 }
