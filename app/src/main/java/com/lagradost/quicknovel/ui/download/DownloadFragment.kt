@@ -310,6 +310,7 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
         binding.viewpager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
+                viewModel.switchPage(position)
                 val currentTab = getKey(DOWNLOAD_SETTINGS, CURRENT_TAB, null) ?: 1
                 binding.swipeContainer.isRefreshing =
                     viewModel.activeRefreshTabs.contains(currentTab)
