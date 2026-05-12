@@ -1,35 +1,23 @@
 package com.lagradost.quicknovel.providers
 
-import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.module.kotlin.readValue
-import com.lagradost.quicknovel.ErrorLoadingException
 import com.lagradost.quicknovel.HeadMainPageResponse
 import com.lagradost.quicknovel.LoadResponse
 import com.lagradost.quicknovel.MainAPI
-import com.lagradost.quicknovel.MainActivity.Companion.app
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.SearchResponse
 import com.lagradost.quicknovel.fixUrlNull
 import com.lagradost.quicknovel.newChapterData
 import com.lagradost.quicknovel.newSearchResponse
 import com.lagradost.quicknovel.newStreamResponse
-import org.jsoup.Jsoup
 
 class MtlNovelProvider : MainAPI() {
     override val name = "MtlNovel"
-    override val mainUrl = "https://www.mtlnovels.com"
+    override val mainUrl = "https://mtlnovel.me"
     override val hasMainPage = true
 
     override val iconId = R.drawable.icon_mtlnovel
 
     override val iconBackgroundId = R.color.wuxiaWorldOnlineColor
-
-    fun fixImage(url: String?): String? {
-        return url?.replace(
-            "https://www.mtlnovel.net/",
-            "https://www.mtlnovels.com/wp-content/uploads/"
-        )
-    }
 
     override val tags = listOf(
         "All" to "",
@@ -83,20 +71,20 @@ class MtlNovelProvider : MainAPI() {
         tag: String?
     ): HeadMainPageResponse {
         val url =
-            if (tag.isNullOrBlank()) "$mainUrl/alltime-rank/page/$page" else "$mainUrl/genre/$tag/page/$page"
+            if (tag.isNullOrBlank()) "$mainUrl/list/?page=$page" else "$mainUrl/category/$tag/?page=$page"
         val document = app.get(url).document
-        val headers = document.select("div.box")
+        val headers = document.select("div.novel-box")
 
         val returnValue = headers.mapNotNull { h ->
             val name =
-                h.selectFirst("a")?.attr("aria-label")?.substringBeforeLast("Cover")
+                h.selectFirst("h3")?.text()
                     ?: return@mapNotNull null
-            val cUrl = h.selectFirst("a")?.attr("href") ?: throw ErrorLoadingException()
+            val cUrl = fixUrlNull(h.selectFirst("a")?.attr("href"))?:""
             newSearchResponse(
                 name = name,
                 url = cUrl,
             ) {
-                posterUrl = fixImage(fixUrlNull(h.selectFirst("amp-img amp-img")?.attr("src")))
+                posterUrl = fixUrlNull(h.selectFirst("img")?.attr("src"))
             }
         }
 
@@ -104,76 +92,55 @@ class MtlNovelProvider : MainAPI() {
     }
 
     override suspend fun loadHtml(url: String): String? {
-        return app.get(url).document.selectFirst("div.par")?.html()
+        return app.get(url).document.selectFirst("div.content.text-break")?.html()
     }
 
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val response =
-            SearchResults.fromJson(
-                app.get(
-                    "$mainUrl/wp-admin/admin-ajax.php?action=autosuggest&q=$query"
-                ).text
-            )
-        return response.items?.first()?.results?.mapNotNull {
+        val response = app.get("$mainUrl/search/?keyword=$query").document
+
+        return response.select("div.novel-box").mapNotNull { c->
             newSearchResponse(
-                name = Jsoup.parse(it.title ?: return@mapNotNull null).text(),
-                url = it.permalink ?: return@mapNotNull null
+                name = c.selectFirst("h3")?.text() ?: return@mapNotNull null,
+                url = fixUrlNull(c.selectFirst("a")?.attr("href"))?: return@mapNotNull null
             ) {
-                posterUrl = fixImage(fixUrlNull(it.thumbnail))
+                posterUrl = fixUrlNull(c.selectFirst("img")?.attr("src"))
             }
-        }!!
+        }
     }
 
 
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
-        val name = document.selectFirst("h1.entry-title")?.text() ?: return null
-        val data = app.get(
-            "$url/chapter-list/"
-        ).document.select("div.ch-list a").reversed().mapNotNull { c ->
-            val href = c.attr("href") ?: return@mapNotNull null
-            val cName = c.text()
-            newChapterData(name = cName, url = href)
-        }
-
-        return newStreamResponse(url = url, name = name, data = data) {
-            author = document.selectFirst("#author")?.text()
-            posterUrl = fixImage(fixUrlNull(document.select("div.nov-head amp-img amp-img").attr("src")))
-            tags = document.select("#currentgen > a").map {
-                it.text()
+        val name = document.selectFirst("h5")?.text() ?: return null
+        val chaptersProvider = Regex("(?<=\\?slug=)([^']+)").find(document.toString())?.value
+        val chaptersGroup = app.get("$mainUrl/ajax/chapters/?slug=$chaptersProvider")
+            .document.select("p.update-box-chapter")
+            .mapNotNull { c ->
+                val href = c.selectFirst("a")?.attr("href")?: return@mapNotNull null
+                val cName = c.text()
+                newChapterData(name = cName, url = href)
             }
-            synopsis = document.selectFirst("div.desc")?.text()
-            peopleVoted = "\\((.+) re".toRegex()
-                .find(
-                    document.selectFirst("span.rating-info")?.text().toString()
-                )?.groupValues?.last()
+
+        return newStreamResponse(url = url, name = name, data = chaptersGroup) {
+            val lis = document.select("div.m-card li")
+
+            author = lis.getOrNull(2)?.selectFirst("pull-right")?.text()
+
+            posterUrl = fixUrlNull(document.selectFirst("div.content-main-image img")?.attr("src"))
+
+            tags = lis.getOrNull(5)?.select("a")?.map { it.text() }
+
+            synopsis = document.selectFirst("div.m-card.text-break")?.ownText()
+
+            peopleVoted = 0
+            rating = document.selectFirst("span.rating")
+                ?.text()
+                ?.trim()
+                ?.toFloat()
+                ?.times(200)
                 ?.toInt()
-            rating =
-                document.selectFirst("span.rating-info")?.selectFirst("strong")?.text()?.toFloat()
-                    ?.times(200)?.toInt()
         }
+
     }
 }
-
-
-private data class SearchResults(
-    @get:JsonProperty("items") val items: List<Item>? = null
-) {
-    companion object {
-        fun fromJson(json: String) = mapper.readValue<SearchResults>(json)
-    }
-}
-
-private data class Item(
-    @get:JsonProperty("query") val query: String? = null,
-    @get:JsonProperty("results") val results: List<Result>? = null
-)
-
-private data class Result(
-    @get:JsonProperty("title") val title: String? = null,
-    @get:JsonProperty("permalink") val permalink: String? = null,
-    @get:JsonProperty("thumbnail") val thumbnail: String? = null,
-    @get:JsonProperty("shortname") val shortname: String? = null,
-    @get:JsonProperty("cn") val cn: String? = null
-)

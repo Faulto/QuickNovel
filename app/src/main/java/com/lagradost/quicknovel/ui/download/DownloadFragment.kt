@@ -1,19 +1,12 @@
 package com.lagradost.quicknovel.ui.download
 
 import android.annotation.SuppressLint
-import android.content.Intent
-import android.content.res.Configuration
-import android.graphics.BitmapFactory
-import android.os.Bundle
-import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
 import android.widget.ImageView
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.SearchView
 import androidx.core.view.isVisible
-import androidx.fragment.app.Fragment
-import androidx.lifecycle.ViewModelProvider
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -21,41 +14,34 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
 import com.lagradost.quicknovel.BaseApplication.Companion.getKey
-import com.lagradost.quicknovel.BaseApplication.Companion.getKeys
 import com.lagradost.quicknovel.BaseApplication.Companion.setKey
-import com.lagradost.quicknovel.BookDownloader2
 import com.lagradost.quicknovel.BookDownloader2Helper
 import com.lagradost.quicknovel.BookDownloader2Helper.IMPORT_SOURCE
+import com.lagradost.quicknovel.BookDownloader2Helper.IMPORT_SOURCE_PDF
+import com.lagradost.quicknovel.CURRENT_TAB
 import com.lagradost.quicknovel.CommonActivity.activity
 import com.lagradost.quicknovel.DOWNLOAD_NORMAL_SORTING_METHOD
 import com.lagradost.quicknovel.DOWNLOAD_SETTINGS
 import com.lagradost.quicknovel.DOWNLOAD_SORTING_METHOD
-import com.lagradost.quicknovel.DOWNLOAD_UNREAD_ONLY_FILTER
-import com.lagradost.quicknovel.DOWNLOAD_COMPLETED_ONLY_FILTER
 import com.lagradost.quicknovel.DownloadState
-import com.lagradost.quicknovel.HISTORY_FOLDER
-import com.lagradost.quicknovel.MainActivity
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.databinding.FragmentDownloadsBinding
 import com.lagradost.quicknovel.databinding.SortBottomSheetBinding
-import com.lagradost.quicknovel.mvvm.logError
 import com.lagradost.quicknovel.mvvm.observe
-import com.lagradost.quicknovel.mvvm.safe
+import com.lagradost.quicknovel.mvvm.observeNullable
+import com.lagradost.quicknovel.ui.BaseFragment
 import com.lagradost.quicknovel.ui.SortingMethodAdapter
 import com.lagradost.quicknovel.ui.UiImage
 import com.lagradost.quicknovel.ui.img
-import com.lagradost.quicknovel.util.ResultCached
 import com.lagradost.quicknovel.util.UIHelper.colorFromAttribute
 import com.lagradost.quicknovel.util.UIHelper.fixPaddingStatusbar
 import com.lagradost.quicknovel.util.UIHelper.setImage
-import com.lagradost.safefile.MimeTypes
-import com.lagradost.safefile.SafeFile
 import kotlinx.coroutines.launch
-import java.io.File
 
-class DownloadFragment : Fragment() {
-    private lateinit var viewModel: DownloadViewModel
-    lateinit var binding: FragmentDownloadsBinding
+class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
+    BindingCreator.Inflate(FragmentDownloadsBinding::inflate)
+) {
+    private val viewModel: DownloadViewModel by viewModels()
 
     data class DownloadData(
         @JsonProperty("source")
@@ -109,9 +95,9 @@ class DownloadFragment : Fragment() {
         val lastDownloaded: Long?,
     ) {
         val image by lazy {
-            if(isImported) {
+            if (isImported) {
                 val bitmap = BookDownloader2Helper.getCachedBitmap(activity, apiName, author, name)
-                if(bitmap != null) {
+                if (bitmap != null) {
                     return@lazy UiImage.Bitmap(bitmap)
                 }
             }
@@ -122,40 +108,13 @@ class DownloadFragment : Fragment() {
             return id
         }
 
-        val isImported: Boolean get() = apiName == IMPORT_SOURCE
+        val isImported: Boolean get() = (apiName == IMPORT_SOURCE || apiName == IMPORT_SOURCE_PDF)
     }
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?,
-    ): View {
-        viewModel = ViewModelProvider(activity ?: this)[DownloadViewModel::class.java]
-        binding = FragmentDownloadsBinding.inflate(inflater)
-        return binding.root
-        //return inflater.inflate(R.layout.fragment_downloads, container, false)
-    }
 
     @SuppressLint("NotifyDataSetChanged")
-    private fun setupGridView() {
-        (binding.viewpager.adapter as? ViewpagerAdapter)?.notifyDataSetChanged()
-        /*val compactView = requireContext().getDownloadIsCompact()
-        val spanCountLandscape = if (compactView) 2 else 6
-        val spanCountPortrait = if (compactView) 1 else 3
-        val orientation = resources.configuration.orientation
-
-        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            binding.downloadCardSpace.spanCount = spanCountLandscape
-            binding.bookmarkCardSpace.spanCount = spanCountLandscape
-        } else {
-            binding.downloadCardSpace.spanCount = spanCountPortrait
-            binding.bookmarkCardSpace.spanCount = spanCountPortrait
-        }*/
-    }
-
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        setupGridView()
+    override fun fixLayout(view: View) {
+        (binding?.viewpager?.adapter as? ViewpagerAdapter)?.notifyDataSetChanged()
     }
 
     // https://stackoverflow.com/a/67441735/13746422
@@ -175,17 +134,12 @@ class DownloadFragment : Fragment() {
     lateinit var searchExitIcon: ImageView
     lateinit var searchMagIcon: ImageView
 
-
-    @SuppressLint("ClickableViewAccessibility")
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
+    override fun onBindingCreated(binding: FragmentDownloadsBinding) {
         viewModel.loadAllData(true)
         // activity?.fixPaddingStatusbar(binding.downloadToolbar)
         activity?.fixPaddingStatusbar(binding.downloadRoot)
         //viewModel = ViewModelProviders.of(activity!!).get(DownloadViewModel::class.java)
 
-        // Load blurred background from last read novel
-        loadBackgroundFromLastRead()
 
         searchExitIcon =
             binding.downloadSearch.findViewById(androidx.appcompat.R.id.search_close_btn)
@@ -205,10 +159,9 @@ class DownloadFragment : Fragment() {
             }
         })
 
-        binding.downloadImportEpub.setOnClickListener {
-            MainActivity.importEpub()
+        binding.downloadImportButton.setOnClickListener {
+            viewModel.importEpub()
         }
-
 
         val adapter = ViewpagerAdapter(viewModel, this) { isScrollingDown ->
             if (isScrollingDown)
@@ -226,6 +179,11 @@ class DownloadFragment : Fragment() {
             }
         }
 
+        observeNullable(viewModel.libraryBackground) { image ->
+            binding.downloadPosterBlur.isVisible =
+                binding.downloadPosterBlur.setImage(image, radius = 100, sample = 3)
+        }
+
         binding.viewpager.adapter = adapter
         //binding.viewpager.reduceDragSensitivity()
 
@@ -240,6 +198,7 @@ class DownloadFragment : Fragment() {
 
             addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
                 override fun onTabSelected(tab: TabLayout.Tab?) {
+                    //binding.swipeContainer.isEnabled = binding.bookmarkTabs.selectedTabPosition == 0
                     viewModel.switchPage(binding.bookmarkTabs.selectedTabPosition)
                 }
 
@@ -253,9 +212,9 @@ class DownloadFragment : Fragment() {
         }
 
         binding.downloadFab.setOnClickListener { view ->
-            val binding = SortBottomSheetBinding.inflate(layoutInflater, null, false)
+            val sheetBinding = SortBottomSheetBinding.inflate(layoutInflater, null, false)
             val bottomSheetDialog = BottomSheetDialog(view.context)
-            bottomSheetDialog.setContentView(binding.root)
+            bottomSheetDialog.setContentView(sheetBinding.root)
 
             val (sorting, key) = if (isOnDownloads) {
                 DownloadViewModel.sortingMethods to DOWNLOAD_SORTING_METHOD
@@ -264,24 +223,6 @@ class DownloadFragment : Fragment() {
             }
             val current = (getKey<Int>(DOWNLOAD_SETTINGS, key) ?: DEFAULT_SORT)
 
-            binding.unreadOnlyToggle.apply {
-                visibility = if (isOnDownloads) View.GONE else View.VISIBLE
-                isChecked = getKey(DOWNLOAD_SETTINGS, DOWNLOAD_UNREAD_ONLY_FILTER, false) == true
-                setOnCheckedChangeListener { _, checked ->
-                    setKey(DOWNLOAD_SETTINGS, DOWNLOAD_UNREAD_ONLY_FILTER, checked)
-                    viewModel.resortAllData()
-                }
-            }
-
-            binding.completedOnlyToggle.apply {
-                visibility = if (isOnDownloads) View.GONE else View.VISIBLE
-                isChecked = getKey(DOWNLOAD_SETTINGS, DOWNLOAD_COMPLETED_ONLY_FILTER, false) == true
-                setOnCheckedChangeListener { _, checked ->
-                    setKey(DOWNLOAD_SETTINGS, DOWNLOAD_COMPLETED_ONLY_FILTER, checked)
-                    viewModel.resortAllData()
-                }
-            }
-
             val adapter = SortingMethodAdapter(current) { item, position, newId ->
                 setKey(DOWNLOAD_SETTINGS, key, newId)
                 viewModel.resortAllData()
@@ -289,7 +230,30 @@ class DownloadFragment : Fragment() {
             }.apply {
                 submitList(sorting.toList())
             }
-            binding.sortClick.adapter = adapter
+            sheetBinding.sortClick.adapter = adapter
+
+            sheetBinding.libraryFilterOptions.isVisible = !isOnDownloads
+            sheetBinding.libraryUnreadOnlyFilter.isChecked = DownloadViewModel.unreadOnlyFilter
+            sheetBinding.libraryNotStartedOnlyFilter.isChecked =
+                DownloadViewModel.notStartedOnlyFilter
+            sheetBinding.libraryCompletedOnlyFilter.isChecked =
+                DownloadViewModel.completedOnlyFilter
+
+            sheetBinding.libraryUnreadOnlyFilter.setOnCheckedChangeListener { _, isChecked ->
+                DownloadViewModel.unreadOnlyFilter = isChecked
+                viewModel.resortAllData()
+            }
+
+            sheetBinding.libraryNotStartedOnlyFilter.setOnCheckedChangeListener { _, isChecked ->
+                DownloadViewModel.notStartedOnlyFilter = isChecked
+                viewModel.resortAllData()
+            }
+
+            sheetBinding.libraryCompletedOnlyFilter.setOnCheckedChangeListener { _, isChecked ->
+                DownloadViewModel.completedOnlyFilter = isChecked
+                viewModel.resortAllData()
+            }
+
             bottomSheetDialog.show()
         }
         /*
@@ -314,27 +278,52 @@ class DownloadFragment : Fragment() {
 
         //swipe_container.setProgressBackgroundColorSchemeColor(requireContext().colorFromAttribute(R.attr.darkBackground))
 
+
         binding.swipeContainer.apply {
             setColorSchemeColors(context.colorFromAttribute(R.attr.colorPrimary))
             setProgressBackgroundColorSchemeColor(context.colorFromAttribute(R.attr.primaryGrayBackground))
             setOnRefreshListener {
-                viewModel.refreshCurrentTab()
+                if (isOnDownloads) {
+                    viewModel.refresh()
+                    isRefreshing = false
+
+                } else {
+                    viewModel.refreshReadingProgress()
+                }
             }
         }
 
         observe(viewModel.isRefreshing) { refreshing ->
-            binding.swipeContainer.isRefreshing = refreshing == true
+            if (refreshing != binding.swipeContainer.isRefreshing) {
+                binding.swipeContainer.isRefreshing = refreshing
+            }
         }
 
+
+        lifecycleScope.launch {
+            viewModel.refresh.collect { tab ->
+                (binding.viewpager.adapter as? ViewpagerAdapter)?.updateProgressOfPage(tab)
+            }
+        }
+
+        var canSwip = true
         binding.viewpager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                super.onPageSelected(position)
+                viewModel.switchPage(position)
+                val currentTab = getKey(DOWNLOAD_SETTINGS, CURRENT_TAB, null) ?: 1
+                binding.swipeContainer.isRefreshing =
+                    viewModel.activeRefreshTabs.contains(currentTab)
+            }
+
             override fun onPageScrollStateChanged(state: Int) {
                 super.onPageScrollStateChanged(state)
-                binding.swipeContainer.isEnabled =
-                    state == ViewPager2.SCROLL_STATE_IDLE
+                canSwip = state == ViewPager2.SCROLL_STATE_IDLE
             }
         })
-
-        setupGridView()
+        binding.swipeContainer.setOnChildScrollUpCallback { parent, child ->
+            return@setOnChildScrollUpCallback !canSwip// true = can't Swip, false = can swip
+        }
 
         /*binding.downloadCardSpace.apply {
             itemAnimator?.changeDuration = 0
@@ -354,33 +343,6 @@ class DownloadFragment : Fragment() {
                 bookmarkAdapter.submitList(cards.map { it.copy() })
             }
         }*/
-    }
 
-    private fun loadBackgroundFromLastRead() {
-        try {
-            // Get the most recently read novel from history
-            val historyKeys = getKeys(HISTORY_FOLDER) ?: return
-            var lastRead: ResultCached? = null
-            var lastTime = 0L
-            
-            for (key in historyKeys) {
-                val cached = getKey<ResultCached>(key) ?: continue
-                if (cached.cachedTime > lastTime) {
-                    lastTime = cached.cachedTime
-                    lastRead = cached
-                }
-            }
-            
-            lastRead?.poster?.let { posterUrl ->
-                binding.downloadBackgroundBlur.setImage(
-                    img(posterUrl),
-                    radius = 100,
-                    sample = 3
-                )
-                binding.downloadBackgroundBlur.isVisible = true
-            }
-        } catch (e: Exception) {
-            logError(e)
-        }
     }
 }

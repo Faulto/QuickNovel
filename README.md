@@ -1,21 +1,3 @@
-Essentially i've changed some things to make quicknovel more usable for myself and changed up the theming a little.
-
-Main stuff is
-- Extra trash category
-- Added Unread only and Completed novels only toggles to sort menu
-- Added sort by unread chapters this includes unread chapter count badges in library
-- You can pull down in category to refresh data for novels in that category (unread counts, cover images, etc)
-- Novel info page now has better download info and can be used offline without having to rely on the Downloads category/section
-- Better caching and loading behaviour (faster)
-
-**Screenshoots:**
-
-![Screenshot_20251230_175522_QuickNovel](https://github.com/user-attachments/assets/f32675d9-b1a1-4958-b8cb-38fa8e8abb72)
-
-
-![Screenshot_20251230_180453_QuickNovel](https://github.com/user-attachments/assets/cbe2a50e-b4c7-42a7-a445-ecdaffcc8ded)
-
-
 # QuickNovel
 Adfree FOSS Android app for downloading novels. It also functions as an Epub reader.
 
@@ -29,17 +11,22 @@ Adfree FOSS Android app for downloading novels. It also functions as an Epub rea
 - https://annas-archive.org
 - https://bestlightnovel.com
 - https://freewebnovel.com
+- https://www.fanmtl.com
 - https://graycity.net
 - https://hiraethtranslation.com
 - https://indowebnovel.id
 - https://kolnovel.com
 - https://libread.com
+- https://lightnovelstranslations.com/Li
 - https://meionovels.com
 - https://risenovel.com
+- https://readonlinefreebook.com
 - https://www.mtlnovels.com
 - https://novelbin.com
 - https://novelfull.com
 - https://novelsonline.org
+- https://novlove.com/
+- https://novelfire.net/
 - https://pawread.com
 - https://readfrom.net
 - https://readnovelfull.com
@@ -47,6 +34,11 @@ Adfree FOSS Android app for downloading novels. It also functions as an Epub rea
 - https://sakuranovel.id
 - https://www.scribblehub.com
 - https://wtr-lab.com
+- https://www.wuxiabox.com/
+
+**Screenshoots:**
+
+<img src="./.github/home.jpg" height="400"/><img src="./.github/search.jpg" height="400"/><img src="./.github/downloads.jpg" height="400"/><img src="./.github/result.jpg" height="400"/><img src="./.github/reader.jpg" height="400"/>
 
 **Legal notice:**
 

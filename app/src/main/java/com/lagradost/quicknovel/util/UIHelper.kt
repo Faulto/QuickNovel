@@ -8,7 +8,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.res.Resources
 import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
@@ -20,8 +19,6 @@ import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
-import android.view.Window
-import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.ImageView
 import android.widget.Toast.LENGTH_LONG
@@ -49,6 +46,7 @@ import com.lagradost.cloudstream3.utils.ImageLoader.loadImage
 import com.lagradost.quicknovel.BaseApplication.Companion.context
 import com.lagradost.quicknovel.CommonActivity
 import com.lagradost.quicknovel.CommonActivity.showToast
+import com.lagradost.quicknovel.QuickBook
 import com.lagradost.quicknovel.ui.UiImage
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.databinding.ImageLayoutBinding
@@ -62,7 +60,6 @@ import java.text.StringCharacterIterator
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 import kotlin.math.sign
-import androidx.core.graphics.drawable.toDrawable
 
 //import androidx.palette.graphics.Palette
 
@@ -146,12 +143,17 @@ object UIHelper {
         }
     }
 
-    fun bindImage(imageView: ImageView, img: AsyncDrawable) {
+    fun bindImage(imageView: ImageView, img: AsyncDrawable, requireCloudFlare: Boolean = false) {
         val url = img.destination
         img.result?.let { drawable ->
             imageView.setImageDrawable(drawable)
         } ?: kotlin.run {
-            imageView.setImage(url)
+            if(requireCloudFlare){
+                imageView.setImage(url, headers = mapOf(DefaultImagesHeaders.useCloudflareKillerHeader))
+            }
+            else{
+                imageView.setImage(url)
+            }
         }
     }
 
@@ -181,10 +183,10 @@ object UIHelper {
         }
     }
 
-    fun showImage(context: Context?, drawable: AsyncDrawable) {
+    fun showImage(context: Context?, drawable: AsyncDrawable, requireCloudFlare:Boolean = false) {
         if (context == null) return
         showImageDialog(context) {
-            bindImage(it, drawable)
+            bindImage(it, drawable, requireCloudFlare)
         }
     }
 
@@ -455,6 +457,13 @@ object UIHelper {
         }
     }
 
+    fun Context.unRequestAudioFocus(focusRequest: AudioFocusRequest?) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && focusRequest != null) {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audioManager.abandonAudioFocusRequest(focusRequest)
+        }
+    }
+
     @ColorInt
     fun Context.getResourceColor(@AttrRes resource: Int, alphaFactor: Float = 1f): Int {
         val typedArray = obtainStyledAttributes(intArrayOf(resource))
@@ -595,14 +604,15 @@ object UIHelper {
     fun Fragment.hideKeyboard() {
         view.let {
             if (it != null) {
-                activity?.hideKeyboard(it)
+                hideKeyboard(it)
             }
         }
     }
 
-    fun Context.hideKeyboard(view: View) {
+    fun hideKeyboard(view: View) {
+        val context = view.context ?: return
         val inputMethodManager =
-            getSystemService(Activity.INPUT_METHOD_SERVICE) as InputMethodManager
+            context.getSystemService(Activity.INPUT_METHOD_SERVICE) as InputMethodManager
         inputMethodManager.hideSoftInputFromWindow(view.windowToken, 0)
     }
 }

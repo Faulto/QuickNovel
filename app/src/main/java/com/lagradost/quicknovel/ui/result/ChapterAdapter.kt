@@ -8,16 +8,54 @@ import androidx.annotation.AttrRes
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.isGone
-import androidx.recyclerview.widget.DiffUtil
 import com.lagradost.quicknovel.ChapterData
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.databinding.SimpleChapterBinding
+import com.lagradost.quicknovel.ui.BaseDiffCallback
 import com.lagradost.quicknovel.ui.NoStateAdapter
 import com.lagradost.quicknovel.ui.ViewHolderState
+import com.lagradost.quicknovel.ui.newSharedPool
 
-class ChapterAdapter(val viewModel: ResultViewModel) : NoStateAdapter<ChapterData>(DiffCallback()) {
+class ChapterAdapter(val viewModel: ResultViewModel) :
+    NoStateAdapter<ChapterData>(
+        diffCallback = BaseDiffCallback(
+            itemSame = { a, b -> a.url == b.url },
+            contentSame = { a, b -> a == b }
+        )) {
     private var zebraEvenColor: Int? = null
     private var zebraOddColor: Int? = null
+
+    companion object {
+        val sharedPool =
+            newSharedPool {
+                setMaxRecycledViews(CONTENT, 10)
+            }
+    }
+
+    private fun Context.resolveThemeColor(@AttrRes attr: Int): Int {
+        val value = TypedValue()
+        theme.resolveAttribute(attr, value, true)
+        return if (value.resourceId != 0) {
+            ContextCompat.getColor(this, value.resourceId)
+        } else {
+            value.data
+        }
+    }
+
+    private fun rowColor(context: Context, position: Int): Int {
+        val even = zebraEvenColor
+        val odd = zebraOddColor
+        if (even != null && odd != null) {
+            return if (position % 2 == 0) even else odd
+        }
+
+        val base = context.resolveThemeColor(R.attr.primaryBlackBackground)
+        val newEven = ColorUtils.setAlphaComponent(base, 26)
+        val newOdd = ColorUtils.setAlphaComponent(base, 44)
+        zebraEvenColor = newEven
+        zebraOddColor = newOdd
+        return if (position % 2 == 0) newEven else newOdd
+    }
 
     override fun onCreateContent(parent: ViewGroup): ViewHolderState<Any> {
         return ViewHolderState(
@@ -40,38 +78,16 @@ class ChapterAdapter(val viewModel: ResultViewModel) : NoStateAdapter<ChapterDat
         binding.releaseDate.alpha = alpha
     }
 
-    private fun resolveThemeColor(context: Context, @AttrRes attrRes: Int): Int {
-        val typedValue = TypedValue()
-        val found = context.theme.resolveAttribute(attrRes, typedValue, true)
-        if (!found) return 0
-
-        return if (typedValue.resourceId != 0) {
-            ContextCompat.getColor(context, typedValue.resourceId)
-        } else {
-            typedValue.data
-        }
-    }
-
     override fun onBindContent(holder: ViewHolderState<Any>, item: ChapterData, position: Int) {
         val binding = holder.view as? SimpleChapterBinding ?: return
-
-        if (zebraEvenColor == null || zebraOddColor == null) {
-            val base = resolveThemeColor(binding.root.context, R.attr.primaryBlackBackground)
-            zebraEvenColor = ColorUtils.setAlphaComponent(base, 26) // ~10%
-            zebraOddColor = ColorUtils.setAlphaComponent(base, 44)  // ~17%
-        }
-
-        binding.root.setCardBackgroundColor(
-            if (position % 2 == 0) zebraEvenColor!! else zebraOddColor!!
-        )
-
         binding.apply {
+            root.setCardBackgroundColor(rowColor(root.context, position))
             name.text = item.name
             releaseDate.text = item.dateOfRelease
             releaseDate.isGone = item.dateOfRelease.isNullOrBlank()
             root.setOnClickListener {
                 viewModel.streamRead(item)
-                refresh(binding, item, viewModel)
+                viewModel.isResume = true//to update read status
             }
             root.setOnLongClickListener {
                 viewModel.setReadChapter(chapter = item, !viewModel.hasReadChapter(item))
@@ -80,13 +96,5 @@ class ChapterAdapter(val viewModel: ResultViewModel) : NoStateAdapter<ChapterDat
             }
             refresh(binding, item, viewModel)
         }
-    }
-
-    class DiffCallback : DiffUtil.ItemCallback<ChapterData>() {
-        override fun areItemsTheSame(oldItem: ChapterData, newItem: ChapterData): Boolean =
-            oldItem.url == newItem.url
-
-        override fun areContentsTheSame(oldItem: ChapterData, newItem: ChapterData): Boolean =
-            oldItem == newItem
     }
 }

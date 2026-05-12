@@ -28,6 +28,7 @@ import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_CHAPTER
 import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_READ_AT
 import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_SCROLL_CHAR
 import com.lagradost.quicknovel.HISTORY_FOLDER
+import com.lagradost.quicknovel.LIBRARY_LAST_READ_ID
 import com.lagradost.quicknovel.LoadResponse
 import com.lagradost.quicknovel.PreferenceDelegate
 import com.lagradost.quicknovel.R
@@ -38,6 +39,7 @@ import com.lagradost.quicknovel.RESULT_CHAPTER_FILTER_DOWNLOADED
 import com.lagradost.quicknovel.RESULT_CHAPTER_FILTER_READ
 import com.lagradost.quicknovel.RESULT_CHAPTER_FILTER_UNREAD
 import com.lagradost.quicknovel.RESULT_CHAPTER_SORT
+import com.lagradost.quicknovel.ReleaseStatus
 import com.lagradost.quicknovel.StreamResponse
 import com.lagradost.quicknovel.UserReview
 import com.lagradost.quicknovel.mvvm.Resource
@@ -53,6 +55,7 @@ import com.lagradost.quicknovel.ui.download.REVERSE_LAST_UPDATED_SORT
 import com.lagradost.quicknovel.ui.download.SortingMethod
 import com.lagradost.quicknovel.util.Apis
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
+import com.lagradost.quicknovel.util.LibraryProgress
 import com.lagradost.quicknovel.util.ResultCached
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -185,6 +188,7 @@ class ResultViewModel : ViewModel() {
             )
         }
 
+        updateReadCount()
         return true
     }
 
@@ -196,6 +200,10 @@ class ResultViewModel : ViewModel() {
     var readState: MutableLiveData<ReadType> = MutableLiveData<ReadType>(ReadType.NONE)
 
     var apiName : String = ""
+
+    /*This is to detect whether it actually returned to
+     the fragment after reading a chapter, and thus update the list of chapters.*/
+    var isResume = false
 
     val currentTabIndex: MutableLiveData<Int> by lazy {
         MutableLiveData<Int>(0)
@@ -210,6 +218,7 @@ class ResultViewModel : ViewModel() {
     private var loadId: Int = 0
     private var loadUrl: String = ""
     private var hasLoaded: Boolean = false
+    private var cachedInitialResult: ResultCached? = null
 
     val loadResponse: MutableLiveData<Resource<LoadResponse>?> =
         MutableLiveData<Resource<LoadResponse>?>()
@@ -279,6 +288,7 @@ class ResultViewModel : ViewModel() {
         loadMutex.withLock {
             if (!hasLoaded) return@launchSafe
             addToHistory()
+            setKey(LIBRARY_LAST_READ_ID, loadId)
             BookDownloader2.readEpub(
                 loadId,
                 downloadState.value?.progress?.toInt() ?: return@launchSafe,
@@ -313,6 +323,7 @@ class ResultViewModel : ViewModel() {
         loadMutex.withLock {
             if (!hasLoaded) return@ioSafe
             addToHistory()
+            setKey(LIBRARY_LAST_READ_ID, loadId)
 
             chapter?.let {
                 // TODO BETTER STORE
@@ -485,11 +496,11 @@ class ResultViewModel : ViewModel() {
                     load.posterUrl,
                     load.tags,
                     load.rating,
-                    streamData?.size ?: 1,
+                    currentTotalChapters(),
                     System.currentTimeMillis(),
                     synopsis = load.synopsis,
-                    status = load.status?.name,
-                    lastChapterName = streamData?.lastOrNull()?.name
+                    status = load.status?.name ?: cachedInitialResult?.status,
+                    lastChapterName = streamData?.lastOrNull()?.name ?: cachedInitialResult?.lastChapterName
                 )
             )
         }
@@ -537,8 +548,10 @@ class ResultViewModel : ViewModel() {
         if (!isGetLoaded && getKey<ResultCached>(RESULT_BOOKMARK, loadId.toString()) != null) {
             return
         }
-
         val streamData = (load as? StreamResponse)?.data
+        if (isGetLoaded && cachedInitialResult != null && streamData.isNullOrEmpty()) {
+            return
+        }
         setKey(
             RESULT_BOOKMARK, loadId.toString(), ResultCached(
                 loadUrl,
@@ -549,11 +562,11 @@ class ResultViewModel : ViewModel() {
                 load.posterUrl,
                 load.tags,
                 load.rating,
-                streamData?.size ?: 1,
+                currentTotalChapters(),
                 System.currentTimeMillis(),
                 synopsis = load.synopsis,
-                status = load.status?.name,
-                lastChapterName = streamData?.lastOrNull()?.name
+                status = load.status?.name ?: cachedInitialResult?.status,
+                lastChapterName = streamData?.lastOrNull()?.name ?: cachedInitialResult?.lastChapterName
             )
         )
     }
@@ -609,16 +622,17 @@ class ResultViewModel : ViewModel() {
     private var downloadStateValue: DownloadProgressState? = null
 
     val readCount: MutableLiveData<Int> by lazy {
-        MutableLiveData<Int>(0)
+        MutableLiveData(0)
+    }
+
+    private fun currentTotalChapters(): Int {
+        val streamCount = (load as? StreamResponse)?.data?.size
+        if (streamCount != null && streamCount > 0) return streamCount
+        return cachedInitialResult?.totalChapters ?: 1
     }
 
     fun updateReadCount() {
-        val streamResponse = (load as? StreamResponse) ?: return
-        val novelName = streamResponse.name
-        val readKeys = getKeys(EPUB_CURRENT_POSITION_READ_AT) ?: return
-        val prefix = "$EPUB_CURRENT_POSITION_READ_AT/$novelName/"
-        val count = readKeys.count { it.startsWith(prefix) }
-        readCount.postValue(count)
+        readCount.postValue(LibraryProgress.readCountForNovelName(load.name))
     }
 
     fun setDownloadState(state: DownloadProgressState) {
@@ -660,9 +674,7 @@ class ResultViewModel : ViewModel() {
                 if (current != null) {
                     setDownloadState(current)
                 } else {
-                    val total = (load as? StreamResponse)?.data?.size?.toLong() ?: 1
-                    
-                    // Try to get download info, or count cached chapters directly
+                    val total = currentTotalChapters()
                     val info = BookDownloader2Helper.downloadInfo(
                         context,
                         load.author,
@@ -673,9 +685,9 @@ class ResultViewModel : ViewModel() {
                         load.author,
                         load.name,
                         load.apiName,
-                        total.toInt()
+                        total
                     )
-                    
+
                     if (info != null) {
                         val new = DownloadProgressState(
                             state = DownloadState.Nothing,
@@ -691,7 +703,7 @@ class ResultViewModel : ViewModel() {
                         val new = DownloadProgressState(
                             state = DownloadState.Nothing,
                             progress = 0,
-                            total = total,
+                            total = total.toLong(),
                             downloaded = 0,
                             lastUpdatedMs = System.currentTimeMillis(),
                             etaMs = null
@@ -719,9 +731,13 @@ class ResultViewModel : ViewModel() {
                 rating = card.rating,
                 synopsis = card.synopsis,
                 tags = card.tags,
-                apiName = card.apiName
+                apiName = card.apiName,
+                status = card.status?.let { storedStatus ->
+                    runCatching { ReleaseStatus.valueOf(storedStatus) }.getOrNull()
+                }
             )
 
+            cachedInitialResult = card
             load = data
             loadResponse.postValue(Resource.Success(data))
             setState(card.id)
@@ -772,6 +788,7 @@ class ResultViewModel : ViewModel() {
                 tags = card.tags,
                 apiName = card.apiName
             )
+            cachedInitialResult = null
             load = data
             loadResponse.postValue(Resource.Success(data))
             setState(card.id)
@@ -780,28 +797,26 @@ class ResultViewModel : ViewModel() {
 
     fun initState(apiName: String, url: String) = viewModelScope.launch {
         isGetLoaded = true
-        
+
         loadMutex.withLock {
             this@ResultViewModel.apiName = apiName
             repo = Apis.getApiFromNameOrNull(apiName)
             loadUrl = url
         }
 
-        // Try to load from cache first for instant display
-        val cachedData = tryLoadFromCache(apiName, url)
-        if (cachedData != null) {
+        val cached = findCachedResult(apiName, url)
+        if (cached != null) {
             loadMutex.withLock {
-                load = cachedData
-                loadUrl = cachedData.url
-                val tid = generateId(cachedData, apiName)
-                setState(tid)
-                loadResponse.postValue(Resource.Success(cachedData))
+                cachedInitialResult = cached
+                load = cached.toStreamResponse()
+                loadUrl = cached.source
+                loadResponse.postValue(Resource.Success(load))
+                setState(cached.id)
             }
         } else {
             loadResponse.postValue(Resource.Loading(url))
         }
 
-        // Fetch fresh data in background
         val data = repo?.load(url)
         loadMutex.withLock {
             when (data) {
@@ -810,6 +825,7 @@ class ResultViewModel : ViewModel() {
 
                     load = res
                     loadUrl = res.url
+                    cachedInitialResult = null
 
                     val tid = generateId(res, apiName)
                     setState(tid)
@@ -817,8 +833,7 @@ class ResultViewModel : ViewModel() {
                 }
 
                 else -> {
-                    // If we already showed cached data, don't show error
-                    if (cachedData == null) {
+                    if (cached == null) {
                         loadResponse.postValue(data)
                     }
                 }
@@ -826,47 +841,31 @@ class ResultViewModel : ViewModel() {
         }
     }
 
-    private fun tryLoadFromCache(apiName: String, url: String): StreamResponse? {
-        // Try to find cached data in RESULT_BOOKMARK or HISTORY_FOLDER
-        val keys = getKeys(RESULT_BOOKMARK) ?: emptyList()
-        for (key in keys) {
-            val cached = getKey<ResultCached>(key) ?: continue
-            if (cached.apiName == apiName && cached.source == url) {
-                // Return cached metadata with empty chapter list
-                // Real chapters will be loaded from network
-                return StreamResponse(
-                    url = cached.source,
-                    name = cached.name,
-                    data = emptyList(),
-                    author = cached.author,
-                    posterUrl = cached.poster,
-                    rating = cached.rating,
-                    synopsis = cached.synopsis,
-                    tags = cached.tags,
-                    apiName = cached.apiName
-                )
+    private fun findCachedResult(apiName: String, url: String): ResultCached? {
+        fun findInFolder(folder: String): ResultCached? {
+            return getKeys(folder)?.firstNotNullOfOrNull { key ->
+                getKey<ResultCached>(key)
+                    ?.takeIf { cached -> cached.apiName == apiName && cached.source == url }
             }
         }
-        // Also check history
-        val historyKeys = getKeys(HISTORY_FOLDER) ?: emptyList()
-        for (key in historyKeys) {
-            val cached = getKey<ResultCached>(key) ?: continue
-            if (cached.apiName == apiName && cached.source == url) {
-                // Return cached metadata with empty chapter list
-                // Real chapters will be loaded from network
-                return StreamResponse(
-                    url = cached.source,
-                    name = cached.name,
-                    data = emptyList(),
-                    author = cached.author,
-                    posterUrl = cached.poster,
-                    rating = cached.rating,
-                    synopsis = cached.synopsis,
-                    tags = cached.tags,
-                    apiName = cached.apiName
-                )
+
+        return findInFolder(RESULT_BOOKMARK) ?: findInFolder(HISTORY_FOLDER)
+    }
+
+    private fun ResultCached.toStreamResponse(): StreamResponse {
+        return StreamResponse(
+            url = source,
+            name = name,
+            data = emptyList(),
+            author = author,
+            posterUrl = poster,
+            rating = rating,
+            synopsis = synopsis,
+            tags = tags,
+            apiName = apiName,
+            status = status?.let { storedStatus ->
+                runCatching { ReleaseStatus.valueOf(storedStatus) }.getOrNull()
             }
-        }
-        return null
+        )
     }
 }

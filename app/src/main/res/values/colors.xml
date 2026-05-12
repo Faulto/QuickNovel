@@ -13,7 +13,11 @@
     <color name="readLightNovelColor">#FFF</color>
     <color name="boxNovelColor">#eb3349</color>
     <color name="kolNovelColor">#222222</color>
-    <color name="rewayatARlColor">#222222</color>
+    <color name="wuxiacliColor">#071832</color>
+    <color name="novelightColor">#12151A</color>
+    <color name="rewayatARlColor">#2196F3</color>
+    <color name="vynovelColor">#892d0b</color>
+    <color name="wuxiacliCkcolor">#071832</color>
 
     <color name="whiteRipple">#33FFFFFF</color>
     <color name="blackRipple">#33000000</color>
@@ -45,6 +49,7 @@
     <color name="blackText">#000</color>
 
     <color name="progressBackgroundColor">#1AFFFFFF</color>
+    <color name="libraryTabOverlay">#33000000</color>
 
     <color name="dubColorText">#121950</color> <!--3b65f5 f18c82 8294F1-->
     <color name="amoledModeLight">#121213</color>

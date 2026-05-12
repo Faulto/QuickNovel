@@ -2,42 +2,30 @@ package com.lagradost.quicknovel.ui.mainpage
 
 import android.content.res.Configuration
 import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.MenuItem
 import android.view.View
-import android.view.ViewGroup
-import android.widget.ArrayAdapter
-import android.widget.Spinner
-import android.widget.TextView
+import android.widget.ImageView
 import androidx.appcompat.widget.SearchView
 import androidx.core.view.isGone
 import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
-import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.lagradost.quicknovel.R
-import com.lagradost.quicknovel.databinding.FilterBottomSheetBinding
 import com.lagradost.quicknovel.databinding.FragmentMainpageBinding
 import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.observe
+import com.lagradost.quicknovel.mvvm.observeNullable
+import com.lagradost.quicknovel.ui.BaseFragment
+import com.lagradost.quicknovel.ui.setRecycledViewPool
+import com.lagradost.quicknovel.util.SingleSelectionHelper.showDialog
 import com.lagradost.quicknovel.util.UIHelper.fixPaddingStatusbar
 
 
-class MainPageFragment : Fragment() {
-    lateinit var binding: FragmentMainpageBinding
+class MainPageFragment : BaseFragment<FragmentMainpageBinding>(
+    BindingCreator.Inflate(FragmentMainpageBinding::inflate)
+) {
     private val viewModel: MainPageViewModel by viewModels()
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?,
-    ): View {
-        binding = FragmentMainpageBinding.inflate(inflater)
-        return binding.root
-    }
 
     companion object {
         fun newInstance(
@@ -69,25 +57,23 @@ class MainPageFragment : Fragment() {
 
     var isInSearch = false
 
-    private fun setupGridView() {
+    override fun fixLayout(view: View) {
         val compactView = false //activity?.getGridIsCompact() ?: return
         val spanCountLandscape = if (compactView) 2 else 6
         val spanCountPortrait = if (compactView) 1 else 3
         val orientation = resources.configuration.orientation
         if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            binding.mainpageList.spanCount = spanCountLandscape
+            binding?.mainpageList?.spanCount = spanCountLandscape
         } else {
-            binding.mainpageList.spanCount = spanCountPortrait
+            binding?.mainpageList?.spanCount = spanCountPortrait
         }
     }
 
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        setupGridView()
-    }
+    lateinit var searchExitIcon: ImageView
+    lateinit var searchMagIcon: ImageView
+    private var lastId: Int = -1 // dirty fix
+    override fun onBindingCreated(binding: FragmentMainpageBinding, savedInstanceState: Bundle?) {
 
-    private var lastId : Int = -1 // dirty fix
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val apiName = requireArguments().getString("apiName")!!
 
         defMainCategory = arguments?.getInt("mainCategory", 0)
@@ -107,7 +93,35 @@ class MainPageFragment : Fragment() {
             defTag
         )
 
-        binding.mainpageToolbar.apply {
+        searchExitIcon = binding.mainSearch.findViewById(androidx.appcompat.R.id.search_close_btn)
+        searchMagIcon = binding.mainSearch.findViewById(androidx.appcompat.R.id.search_mag_icon)
+        searchMagIcon.scaleX = 0.65f
+        searchMagIcon.scaleY = 0.65f
+        binding.mainSearch.queryHint = "${getString(R.string.search)} $apiName…"
+        binding.searchBrowse.setOnClickListener {
+            viewModel.openInBrowser()
+        }
+        binding.searchBack.setOnClickListener {
+            if (viewModel.isInSearch.value == true) {
+                viewModel.switchToMain()
+            } else {
+                activity?.onBackPressed()
+            }
+        }
+
+        binding.mainSearch.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+            override fun onQueryTextSubmit(query: String): Boolean {
+                viewModel.search(query)
+                return true
+            }
+
+            override fun onQueryTextChange(newText: String): Boolean {
+                return true
+            }
+        })
+
+
+        /*binding.mainpageToolbar.apply {
             title = apiName
             setNavigationIcon(R.drawable.ic_baseline_arrow_back_24)
             setNavigationOnClickListener {
@@ -153,35 +167,33 @@ class MainPageFragment : Fragment() {
                     return true
                 }
             })
-        }
+        }*/
 
-        setupGridView()
 
         binding.mainpageList.apply {
-            val mainPageAdapter = MainAdapter2(this, 1)
+            setRecycledViewPool(MainAdapter.sharedPool)
+            val mainPageAdapter = MainAdapter(this, 1)
             adapter = mainPageAdapter
             addOnScrollListener(object : RecyclerView.OnScrollListener() {
                 override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                    if (dy > 0) { //check for scroll down
-                        binding.mainpageFab.shrink()
-                        val layoutManager =
-                            recyclerView.layoutManager as? GridLayoutManager ?: return
-                        visibleItemCount = layoutManager.childCount
-                        totalItemCount = layoutManager.itemCount
-                        pastVisiblesItems = layoutManager.findFirstVisibleItemPosition()
-                        if (!isLoading && !isInSearch) {
-                            if (visibleItemCount + pastVisiblesItems >= totalItemCount) {
-                                isLoading = true
-                                viewModel.load(
-                                    null,
-                                    viewModel.currentMainCategory.value,
-                                    viewModel.currentOrderBy.value,
-                                    viewModel.currentTag.value
-                                )
-                            }
+                    if (dy <= 0) { //check for scroll down
+                        return
+                    }
+                    val layoutManager =
+                        recyclerView.layoutManager as? GridLayoutManager ?: return
+                    visibleItemCount = layoutManager.childCount
+                    totalItemCount = layoutManager.itemCount
+                    pastVisiblesItems = layoutManager.findFirstVisibleItemPosition()
+                    if (!isLoading && !isInSearch) {
+                        if (visibleItemCount + pastVisiblesItems >= totalItemCount) {
+                            isLoading = true
+                            viewModel.load(
+                                null,
+                                viewModel.currentMainCategory.value,
+                                viewModel.currentOrderBy.value,
+                                viewModel.currentTag.value
+                            )
                         }
-                    } else if (dy < -5) {
-                        binding.mainpageFab.extend()
                     }
                 }
             })
@@ -194,7 +206,6 @@ class MainPageFragment : Fragment() {
                 when (data) {
                     is Resource.Success -> {
                         val value = data.value
-                        binding.mainpageLoading.isVisible = false
                         binding.mainpageLoadingError.isVisible = false
                         mainPageAdapter.submitList(value.items)
 
@@ -208,13 +219,20 @@ class MainPageFragment : Fragment() {
                         binding.mainpageList.isInvisible = false
                         //binding.mainpageList.isVisible = true
                         // mainPageAdapter.setLoading(false)
+
+
+                        searchExitIcon.alpha = 1f
+                        binding.searchLoadingBar.alpha = 0f
                     }
 
                     is Resource.Loading -> {
                         mainPageAdapter.submitList(listOf())
                         binding.mainpageList.isInvisible = true
-                        binding.mainpageLoading.isVisible = true
                         binding.mainpageLoadingError.isVisible = false
+
+
+                        searchExitIcon.alpha = 0f
+                        binding.searchLoadingBar.alpha = 1f
                         // mainPageAdapter.setLoading(true)
                     }
 
@@ -222,8 +240,11 @@ class MainPageFragment : Fragment() {
                         mainPageAdapter.submitList(listOf())
                         binding.mainpageList.isInvisible = false
                         binding.mainpageErrorText.text = data.errorString
-                        binding.mainpageLoading.isVisible = false
                         binding.mainpageLoadingError.isVisible = true
+
+                        searchExitIcon.alpha = 1f
+                        binding.searchLoadingBar.alpha = 0f
+
                         // mainPageAdapter.setLoading(false)
                     }
                 }
@@ -233,75 +254,66 @@ class MainPageFragment : Fragment() {
         }
 
 
-        binding.mainpageFab.setOnClickListener {
-            val api = viewModel.api
-            if (!api.hasMainPage) {
-                return@setOnClickListener
-            }
-
-            val bottomSheetDialog = BottomSheetDialog(requireContext())
-            val binding = FilterBottomSheetBinding.inflate(layoutInflater, null, false)
-            bottomSheetDialog.setContentView(binding.root)
-
-            fun setUp(
-                data: List<Pair<String, String>>,
-                txt: TextView,
-                spinner: Spinner,
-                startId: Int?
-            ) {
-                if (data.isEmpty()) {
-                    txt.isVisible = false
-                    spinner.isVisible = false
-                } else {
-                    val arrayAdapter =
-                        ArrayAdapter<String>(requireContext(), R.layout.spinner_select_dialog)
-
-                    arrayAdapter.addAll(data.map { t -> t.first })
-                    spinner.adapter = arrayAdapter
-                    spinner.setSelection(startId ?: 0)
-                }
-            }
-            binding.apply {
-                setUp(
-                    api.orderBys,
-                    filterOrderText,
-                    filterOrderSpinner,
-                    viewModel.currentOrderBy.value
-                )
-                setUp(
-                    api.mainCategories,
-                    filterGeneralText,
-                    filterGeneralSpinner,
-                    viewModel.currentMainCategory.value
-                )
-                setUp(api.tags, filterTagText, filterTagSpinner, viewModel.currentTag.value)
-
-                filterButton.setOnClickListener {
-                    fun getId(spinner: Spinner): Int? {
-                        return if (spinner.isVisible) spinner.selectedItemPosition else null
-                    }
-
-                    val generalId = getId(filterGeneralSpinner)
-                    val orderId = getId(filterOrderSpinner)
-                    val tagId = getId(filterTagSpinner)
-                    isLoading = true
-
-                    viewModel.load(0, generalId, orderId, tagId)
-
-                    bottomSheetDialog.dismiss()
-                }
-            }
-            bottomSheetDialog.setOnDismissListener {
-                //  MainActivity.semihideNavbar()
-            }
-            bottomSheetDialog.show()
-            //  MainActivity.showNavbar()
+        observeNullable(viewModel.currentOrderBy) { orderBy ->
+            val spinner = binding.filterOrderSpinner
+            val orderPair = orderBy?.let { viewModel.api.orderBys.getOrNull(it) }
+            spinner.isVisible = orderPair != null
+            spinner.text = orderPair?.first
         }
 
+        observeNullable(viewModel.currentTag) { tagBy ->
+            val spinner = binding.filterTagSpinner
+            val tagPair = tagBy?.let { viewModel.api.tags.getOrNull(it) }
+            spinner.isVisible = tagPair != null
+            spinner.text = tagPair?.first
+        }
+
+        observeNullable(viewModel.currentMainCategory) { generalBy ->
+            val spinner = binding.filterGeneralSpinner
+            val generalPair = generalBy?.let { viewModel.api.mainCategories.getOrNull(it) }
+            spinner.isVisible = generalPair != null
+            spinner.text = generalPair?.first
+        }
+
+        binding.filterGeneralSpinner.setOnClickListener { view ->
+            val context = view.context ?: return@setOnClickListener
+            context.showDialog(
+                viewModel.api.mainCategories.map { it.first },
+                viewModel.currentMainCategory.value ?: -1,
+                context.getString(R.string.filter_dialog_general),
+                true,
+                {}) { selection ->
+                viewModel.setMainCategory(selection)
+            }
+        }
+
+        binding.filterTagSpinner.setOnClickListener { view ->
+            val context = view.context ?: return@setOnClickListener
+            context.showDialog(
+                viewModel.api.tags.map { it.first },
+                viewModel.currentTag.value ?: -1,
+                context.getString(R.string.filter_dialog_genre),
+                true,
+                {}) { selection ->
+                viewModel.setTag(selection)
+            }
+        }
+
+        binding.filterOrderSpinner.setOnClickListener { view ->
+            val context = view.context ?: return@setOnClickListener
+            context.showDialog(
+                viewModel.api.orderBys.map { it.first },
+                viewModel.currentOrderBy.value ?: -1,
+                context.getString(R.string.filter_dialog_order_by),
+                true,
+                {}) { selection ->
+                viewModel.setOrderBy(selection)
+            }
+        }
 
         observe(viewModel.isInSearch) {
             isInSearch = it
-            binding.mainpageFab.isGone = it // CANT USE FILTER ON A SEARCHERS
+            binding.mainpageSortbyHolder.isGone = it // CANT USE FILTER ON A SEARCHERS
         }
     }
 }

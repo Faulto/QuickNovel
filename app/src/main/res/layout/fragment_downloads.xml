@@ -8,27 +8,27 @@
         android:background="?attr/primaryBlackBackground">
 
     <ImageView
-            android:id="@+id/download_background_blur"
+            android:id="@+id/download_poster_blur"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:alpha="0.35"
+            android:background="?attr/primaryBlackBackground"
+            android:contentDescription="@string/background_image_descript"
             android:scaleType="centerCrop"
-            android:alpha="0.3"
             android:visibility="gone"
-            tools:visibility="visible"
-            android:contentDescription="@string/background_image_descript" />
+            tools:visibility="visible" />
 
     <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@android:color/transparent"
             android:orientation="vertical">
 
-        <FrameLayout
-                android:visibility="visible"
-                android:layout_height="40dp"
-                android:layout_margin="10dp"
-                android:background="@drawable/search_background"
-                android:layout_width="match_parent">
+    <FrameLayout
+            android:visibility="visible"
+            android:layout_height="40dp"
+            android:layout_margin="10dp"
+            android:background="@drawable/search_background"
+            android:layout_width="match_parent">
 
         <androidx.appcompat.widget.SearchView
                 android:animateLayoutChanges="true"
@@ -36,12 +36,12 @@
                 app:queryBackground="@color/transparent"
                 app:searchIcon="@drawable/search_icon"
                 android:paddingStart="-10dp"
-                android:paddingEnd="30dp"
                 android:iconifiedByDefault="false"
-                app:queryHint="@string/search_hint"
+                app:queryHint="@string/search_downloads"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:layout_gravity="center_vertical"
+                android:layout_marginEnd="40dp"
                 app:iconifiedByDefault="false"
                 tools:ignore="RtlSymmetry">
 
@@ -52,17 +52,15 @@
         </androidx.appcompat.widget.SearchView>
 
         <ImageView
-                android:id="@+id/download_import_epub"
-                android:background="?selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_baseline_add_24"
+                android:id="@+id/download_import_button"
                 android:layout_width="25dp"
                 android:layout_height="25dp"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="8dp"
-                android:layout_marginEnd="5dp"
                 android:layout_gravity="end|center_vertical"
-                app:tint="?attr/iconColor"
-                android:contentDescription="@string/import_epub" />
+                android:layout_margin="10dp"
+                android:background="?selectableItemBackgroundBorderless"
+                android:contentDescription="@string/import_epub"
+                android:src="@drawable/ic_baseline_menu_book_24"
+                app:tint="?attr/white" />
     </FrameLayout>
 
     <!--<com.google.android.material.appbar.AppBarLayout
@@ -90,7 +88,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="40dp"
                 android:layout_gravity="bottom"
-                android:background="?attr/primaryGrayBackground"
+                android:background="@color/libraryTabOverlay"
                 android:descendantFocusability="blocksDescendants"
                 android:focusable="false"
                 android:paddingHorizontal="5dp"
@@ -110,18 +108,15 @@
             android:layout_height="wrap_content">
 
         <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-                android:background="@android:color/transparent"
-
+                android:background="@color/transparent"
                 android:id="@+id/swipe_container"
                 android:layout_width="match_parent"
                 app:layout_behavior="@string/appbar_scrolling_view_behavior"
                 android:layout_height="match_parent">
-
             <androidx.viewpager2.widget.ViewPager2
                     android:id="@+id/viewpager"
                     android:paddingBottom="40dp"
                     android:clipToPadding="false"
-                    android:background="@android:color/transparent"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     tools:listitem="@layout/viewpager_page" />
@@ -133,7 +128,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="40dp"
                 android:layout_gravity="bottom"
-                android:background="#59000000"
+                android:background="?attr/primaryGrayBackground"
                 android:descendantFocusability="blocksDescendants"
                 android:focusable="false"
                 android:paddingHorizontal="5dp"

@@ -14,6 +14,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.RectF
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -30,6 +31,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toBitmap
 import androidx.core.net.toUri
 import androidx.preference.PreferenceManager
+import androidx.work.ListenableWorker
 import coil3.Extras
 import coil3.SingletonImageLoader
 import coil3.asDrawable
@@ -43,21 +45,25 @@ import com.lagradost.quicknovel.BaseApplication.Companion.setKey
 import com.lagradost.quicknovel.BookDownloader2.LOCAL_EPUB
 import com.lagradost.quicknovel.BookDownloader2.LOCAL_EPUB_MIN_SIZE
 import com.lagradost.quicknovel.BookDownloader2Helper.IMPORT_SOURCE
+import com.lagradost.quicknovel.BookDownloader2Helper.IMPORT_SOURCE_PDF
 import com.lagradost.quicknovel.BookDownloader2Helper.createQuickStream
 import com.lagradost.quicknovel.BookDownloader2Helper.generateId
 import com.lagradost.quicknovel.BookDownloader2Helper.getDirectory
 import com.lagradost.quicknovel.CommonActivity.activity
 import com.lagradost.quicknovel.CommonActivity.showToast
 import com.lagradost.quicknovel.DataStore.mapper
+import com.lagradost.quicknovel.DownloadFileWorkManager.Companion.viewModel
 import com.lagradost.quicknovel.ImageDownloader.getImageBitmapFromUrl
 import com.lagradost.quicknovel.NotificationHelper.etaToString
 import com.lagradost.quicknovel.extractors.ExtractorApi
 import com.lagradost.quicknovel.mvvm.logError
-import com.lagradost.quicknovel.ui.UiImage
+import com.lagradost.quicknovel.ui.ReadType
 import com.lagradost.quicknovel.ui.download.DownloadFragment
 import com.lagradost.quicknovel.ui.settings.SettingsFragment.Companion.getBasePath
 import com.lagradost.quicknovel.ui.settings.SettingsFragment.Companion.getDefaultDir
 import com.lagradost.quicknovel.util.Apis.Companion.getApiFromName
+import com.lagradost.quicknovel.util.Apis.Companion.getApiFromNameOrNull
+import com.lagradost.quicknovel.util.AppUtils.textToHtmlChapter
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
 import com.lagradost.quicknovel.util.Coroutines.main
 import com.lagradost.quicknovel.util.Event
@@ -65,23 +71,34 @@ import com.lagradost.quicknovel.util.ResultCached
 import com.lagradost.quicknovel.util.UIHelper.colorFromAttribute
 import com.lagradost.quicknovel.util.pmap
 import com.lagradost.safefile.SafeFile
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
+import com.tom_roush.pdfbox.text.PDFTextStripperByArea
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import me.ag2s.epublib.domain.Author
 import me.ag2s.epublib.domain.EpubBook
 import me.ag2s.epublib.domain.MediaType
-import me.ag2s.epublib.domain.Resource
-import me.ag2s.epublib.epub.EpubWriter
 import me.ag2s.epublib.domain.MediaTypes
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
+import me.ag2s.epublib.domain.Resource
 import me.ag2s.epublib.epub.EpubReader
+import me.ag2s.epublib.epub.EpubWriter
 import me.ag2s.epublib.util.zip.AndroidZipFile
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
-
+import kotlin.coroutines.cancellation.CancellationException
 
 enum class DownloadActionType {
     Pause,
@@ -144,8 +161,10 @@ data class QuickStreamData(
 
 object BookDownloader2Helper {
     const val IMPORT_SOURCE = "Download"
+    const val IMPORT_SOURCE_PDF = "importsourcepdf"
     private val fs = File.separatorChar
     private const val reservedChars = "|\\?*<\":>+[]/'"
+
     fun sanitizeFilename(name: String): String {
         var tempName = name
         for (c in reservedChars) {
@@ -163,7 +182,7 @@ object BookDownloader2Helper {
     }
 
     fun getFilenameIMG(apiName: String, author: String, name: String): String {
-        return "$fs$apiName$fs$author$fs$name${fs}poster.jpg".replace("$fs$fs", "$fs")
+        return "${getDirectory(apiName, author, name)}${fs}poster.jpg".replace("$fs$fs", "$fs")
     }
 
     private val cachedBitmaps = hashMapOf<String, Bitmap>()
@@ -324,6 +343,7 @@ object BookDownloader2Helper {
         }
     }
 
+    //here you decide the progress and downloaded
     fun downloadInfo(
         context: Context?,
         author: String?,
@@ -348,12 +368,27 @@ object BookDownloader2Helper {
 
             val (count, downloaded) =
                 if (epub.exists()) {
-                    val length = epub.length()
-                    if (length > LOCAL_EPUB_MIN_SIZE) {
-                        1 to 1
-                    } else {
-                        0 to 0
-                    }
+                    var value: Pair<Int, Int> = 1 to 1
+                    //if is an epub, calculate progress
+                    if (sApiname == IMPORT_SOURCE_PDF) {
+                        val tempFolder = File(context.cacheDir, "temp_$id")
+
+                        if (tempFolder.exists()) {
+                            val xhtmlCount = tempFolder.listFiles { _, name ->
+                                name.endsWith(".xhtml", ignoreCase = true)
+                            }?.size ?: 0
+                            value = xhtmlCount to xhtmlCount
+                        } else {
+                            val total = getKey<Int>(DOWNLOAD_TOTAL, id.toString()) ?: return null
+                            value = total to total
+                        }
+                    } else
+                        if (epub.length() > LOCAL_EPUB_MIN_SIZE)
+                            value = 1 to 1
+                        else
+                            value = 0 to 0
+
+                    value
                 } else {
                     val existingFiles = File(
                         context.filesDir.toString() + getDirectory(
@@ -421,10 +456,6 @@ object BookDownloader2Helper {
         }
     }
 
-    /**
-     * Count cached chapters without requiring DOWNLOAD_TOTAL to be set.
-     * Uses the provided total from the loaded novel data.
-     */
     fun countCachedChapters(
         context: Context?,
         author: String?,
@@ -440,55 +471,56 @@ object BookDownloader2Helper {
             val sName = sanitizeFilename(name)
             val id = generateId(apiName, author, name)
 
-            val epub = File(
+            val directory = File(
                 context.filesDir.toString() + getDirectory(
                     sApiname,
                     sAuthor,
                     sName
-                ), LOCAL_EPUB
+                )
             )
 
-            val (count, downloaded) =
-                if (epub.exists()) {
-                    val length = epub.length()
-                    if (length > LOCAL_EPUB_MIN_SIZE) {
-                        total to total
-                    } else {
-                        0 to 0
-                    }
+            val epub = File(directory, LOCAL_EPUB)
+            val (progress, downloaded) = if (epub.exists()) {
+                if (sApiname == IMPORT_SOURCE_PDF) {
+                    val tempFolder = File(context.cacheDir, "temp_$id")
+                    val xhtmlCount = tempFolder.listFiles { _, fileName ->
+                        fileName.endsWith(".xhtml", ignoreCase = true)
+                    }?.size ?: total
+                    xhtmlCount.coerceAtMost(total) to xhtmlCount.coerceAtMost(total)
+                } else if (epub.length() > LOCAL_EPUB_MIN_SIZE) {
+                    total to total
                 } else {
-                    val existingFiles = File(
-                        context.filesDir.toString() + getDirectory(
-                            sApiname,
-                            sAuthor,
-                            sName
-                        )
-                    ).listFiles()?.mapNotNull { it.nameWithoutExtension.toIntOrNull() }?.sorted()
-
-                    if (existingFiles.isNullOrEmpty()) {
-                        0 to 0
-                    } else {
-                        // Count all cached chapter files
-                        val cachedCount = existingFiles.size
-                        // Find highest continuous sequence for "progress"
-                        val start = getKey<Int>(DOWNLOAD_OFFSET, id.toString()) ?: 0
-                        val startIndex = maxOf(existingFiles.indexOfFirst { x -> x >= start }, 0)
-                        var last = existingFiles[startIndex]
-                        var downloads = startIndex + 1
-                        for (i in startIndex + 1 until existingFiles.size) {
-                            if (existingFiles[i] == last + 1) {
-                                downloads += 1
-                                last = existingFiles[i]
-                            } else {
-                                break
-                            }
-                        }
-                        (last + 1) to cachedCount
-                    }
+                    0 to 0
                 }
-            
-            if (count <= 0) return null
-            return DownloadProgress(count.toLong(), total.toLong(), downloaded.toLong())
+            } else {
+                val existingFiles = directory
+                    .listFiles()
+                    ?.mapNotNull { it.nameWithoutExtension.toIntOrNull() }
+                    ?.sorted()
+
+                if (existingFiles.isNullOrEmpty()) {
+                    0 to 0
+                } else {
+                    val start = getKey<Int>(DOWNLOAD_OFFSET, id.toString()) ?: 0
+                    val firstIndex = existingFiles.indexOfFirst { it >= start }.let { index ->
+                        if (index == -1) 0 else index
+                    }
+                    var lastContinuous = existingFiles[firstIndex]
+                    for (i in firstIndex + 1 until existingFiles.size) {
+                        if (existingFiles[i] == lastContinuous + 1) {
+                            lastContinuous = existingFiles[i]
+                        } else {
+                            break
+                        }
+                    }
+
+                    (lastContinuous + 1).coerceAtMost(total) to existingFiles.size.coerceAtMost(total)
+                }
+            }
+
+            if (progress <= 0) return null
+            setKey(DOWNLOAD_SIZE, id.toString(), progress)
+            return DownloadProgress(progress.toLong(), total.toLong(), downloaded.toLong())
         } catch (e: Exception) {
             return null
         }
@@ -562,7 +594,7 @@ object BookDownloader2Helper {
     ): LoadedChapter? {
         val path = getFilePath(meta, index)
         downloadIndividualChapter(path, getApiFromName(meta.apiName), chapter, forceReload)
-        return getChapter(path, index, getStripHtml())
+        return getChapter(path, index, getStripHtml(), false)
     }
 
     @WorkerThread
@@ -604,11 +636,11 @@ object BookDownloader2Helper {
         val displayName = "${sanitizeFilename(name)}.epub"
         val foundFile = subDir.findFileOrThrow(displayName)
 
-        if (openInApp ?: !(settingsManager.getBoolean(
-                activity.getString(R.string.external_reader_key),
-                true
-            ))
-        ) {
+        val externalReader = settingsManager.getBoolean(
+            activity.getString(R.string.external_reader_key),
+            true
+        )
+        if (openInApp ?: !externalReader) {
             val myIntent = Intent(activity, ReadActivity2::class.java)
             myIntent.setDataAndType(foundFile.uriOrThrow(), "application/epub+zip")
             activity.startActivity(myIntent)
@@ -638,10 +670,24 @@ object BookDownloader2Helper {
         return (settingsManager.getBoolean(this.getString(R.string.remove_external_key), true))
     }
 
+    // External readers cant remove the authors notes easily
+    private fun Context.getStripAuthorNodes(): Boolean {
+        val settingsManager = PreferenceManager.getDefaultSharedPreferences(this)
+
+        val externalReader = settingsManager.getBoolean(
+            getString(R.string.external_reader_key),
+            true
+        )
+        val authorsNotes = getKey<Boolean>(EPUB_AUTHOR_NOTES) ?: true
+
+        return externalReader && !authorsNotes
+    }
+
     private fun getChapter(
         filepath: String,
         index: Int,
-        stripHtml: Boolean
+        stripHtml: Boolean,
+        stripAuthorNotes: Boolean
     ): LoadedChapter? {
         val rFile = File(filepath)
         if (rFile.exists()) {
@@ -652,7 +698,12 @@ object BookDownloader2Helper {
             } // Invalid File
             val title = text.substring(0, firstChar)
             val data = text.substring(firstChar + 1)
-            val html = (if (stripHtml) stripHtml(data, title, index) else data)
+            val html = if (!stripHtml) data else stripHtml(
+                data,
+                title,
+                index,
+                stripAuthorNotes
+            )
             return LoadedChapter(title, html)
         }
         return null
@@ -665,11 +716,10 @@ object BookDownloader2Helper {
         forceReload: Boolean = false,
         maxTries: Int = 5
     ): Boolean = withContext(Dispatchers.IO) {
-        // Don't attempt to download if URL is empty/blank (invalid chapter data)
         if (data.url.isBlank()) {
             return@withContext false
         }
-        
+
         val rFile = File(filepath)
         if (rFile.exists() && rFile.length() > 0 && !forceReload) {
             return@withContext true
@@ -697,7 +747,8 @@ object BookDownloader2Helper {
                         delay(api.rateLimitTime)
                     }
                 }
-            } finally {
+            }
+            finally {
                 if (rateLimit) {
                     api.api.rateLimitMutex.unlock()
                 }
@@ -740,57 +791,6 @@ object BookDownloader2Helper {
             val fileStream =
                 file.openOutputStream(append = false) ?: throw IOException("No outputfile")
 
-            /*if (isScopedStorage()) {
-                val cr = activity.contentResolver ?: return false
-
-                val currentExistingFile =
-                    cr.getExistingDownloadUriOrNullQ(
-                        relativePath,
-                        displayName
-                    ) // CURRENT FILE WITH THE SAME PATH
-
-                if (currentExistingFile != null) { // DELETE FILE IF FILE EXITS AND NOT RESUME
-                    val rowsDeleted =
-                        activity.contentResolver.delete(currentExistingFile, null, null)
-                    if (rowsDeleted < 1) {
-                        println("ERROR DELETING FILE!!!")
-                    }
-                }
-
-                val contentUri =
-                    MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) // USE INSTEAD OF MediaStore.Downloads.EXTERNAL_CONTENT_URI
-
-                val newFile = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-                    put(MediaStore.MediaColumns.TITLE, name)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "application/epub+zip")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-                }
-
-                val newFileUri = cr.insert(
-                    contentUri,
-                    newFile
-                ) ?: return false
-
-                fileStream = cr.openOutputStream(newFileUri, "w")
-                    ?: return false
-            } else {
-                val normalPath =
-                    "${Environment.getExternalStorageDirectory()}${fs}$relativePath$displayName"
-
-                // NORMAL NON SCOPED STORAGE FILE CREATION
-                val rFile = File(normalPath)
-                if (!rFile.exists()) {
-                    rFile.parentFile?.mkdirs()
-                    if (!rFile.createNewFile()) return false
-                } else {
-                    rFile.parentFile?.mkdirs()
-                    if (!rFile.delete()) return false
-                    if (!rFile.createNewFile()) return false
-                }
-                fileStream = FileOutputStream(rFile, false)
-            }*/
-
             val epubFile = File(
                 activity.filesDir.toString() + getDirectory(sApiName, sAuthor, sName),
                 LOCAL_EPUB
@@ -821,6 +821,7 @@ object BookDownloader2Helper {
                 }
 
                 val stripHtml = activity.getStripHtml()
+                val stripAuthorNotes = activity.getStripAuthorNodes()
                 val head = activity.filesDir.toString()
                 val dir = File(head + getDirectory(sApiName, sAuthor, sName))
                 // do not include chapters that are stream read downloaded in partial chapter generation
@@ -838,7 +839,8 @@ object BookDownloader2Helper {
                             sName,
                             threadIndex
                         )
-                    val chap = getChapter(filepath, threadIndex, stripHtml) ?: return@pmap null
+                    val chap = getChapter(filepath, threadIndex, stripHtml, stripAuthorNotes)
+                        ?: return@pmap null
                     Triple(
                         Resource(
                             "id$threadIndex",
@@ -936,164 +938,128 @@ object NotificationHelper {
 
     suspend fun createNotification(
         context: Context?,
-        source: String,
+        source: String?,
         id: Int,
-        load: LoadResponse,
+        name: String,
+        posterUrl: String? = null,
         stateProgressState: DownloadProgressState,
-        showNotification: Boolean,
-        progressInBytes: Boolean,
+        progressInBytes: Boolean = true,
+        isActionable: Boolean = true,
+        isStreamNovel: Boolean = true,
     ) {
         if (context == null) return
         val state = stateProgressState.state
-        var timeFormat = ""
-        if (state == DownloadState.IsDownloading) { // ETA
-            timeFormat = etaToString(stateProgressState.etaMs)
+        val timeFormat = if (state == DownloadState.IsDownloading) etaToString(
+            stateProgressState.etaMs
+        ) else ""
+
+        val intent = Intent(context, MainActivity::class.java).apply {
+            data = source?.toUri()
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
 
-        if (showNotification) {
-            val intent = Intent(context, MainActivity::class.java).apply {
-                data = source.toUri()
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            }
+        val pendingIntent: PendingIntent = PendingIntent.getActivity(
+            context, 0, intent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+        )
 
-            val pendingIntent: PendingIntent = PendingIntent.getActivity(
-                context, 0, intent,
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                    PendingIntent.FLAG_MUTABLE else 0
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setAutoCancel(true)
+            .setColorized(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setColor(context.colorFromAttribute(R.attr.colorPrimary))
+            .setContentTitle(name)
+            .setContentIntent(pendingIntent)
+
+
+        val extraText = if (stateProgressState.total > 1) {
+            val unit = if (progressInBytes) "Kb" else ""
+            val div = if (progressInBytes) 1024 else 1
+
+            if(isStreamNovel)
+                "${stateProgressState.progress} / ${stateProgressState.total}"
+            else
+                "${stateProgressState.progress / div} $unit / ${stateProgressState.total / div}${if(unit.isNotEmpty()) " $unit" else ""}"
+        } else ""
+
+        val statusText = when (state) {
+            DownloadState.IsDone -> "Download Done"
+            DownloadState.IsDownloading -> "Downloading $extraText"
+            DownloadState.IsPaused -> "Paused $extraText"
+            DownloadState.IsFailed -> "Error $extraText"
+            DownloadState.IsStopped -> "Stopped $extraText"
+            else -> ""
+        }
+        builder.setContentText(statusText)
+
+        builder.setSmallIcon(
+            when (state) {
+                DownloadState.IsDone -> R.drawable.rddone
+                DownloadState.IsDownloading -> R.drawable.rdload
+                DownloadState.IsPaused -> R.drawable.rdpause
+                else -> R.drawable.rderror
+            }
+        )
+
+
+        if (state == DownloadState.IsDownloading || state == DownloadState.IsPaused) {
+            builder.setProgress(
+                stateProgressState.total.toInt(),
+                stateProgressState.progress.toInt(),
+                stateProgressState.total <= 1
             )
-            val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-                .setAutoCancel(true)
-                .setColorized(true)
-                .setAutoCancel(true)
-                .setOnlyAlertOnce(true)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setColor(context.colorFromAttribute(R.attr.colorPrimary))
-                .setContentText(
-                    if (stateProgressState.total > 1) {
-                        val extra = if (progressInBytes) {
-                            val bytesToKiloBytes = 1024
-                            "${stateProgressState.progress / bytesToKiloBytes} Kb/${stateProgressState.total / bytesToKiloBytes} Kb"
-                        } else {
-                            "${stateProgressState.progress}/${stateProgressState.total}"
-                        }
+            if (timeFormat.isNotEmpty()) builder.setSubText("$timeFormat remaining")
+        }
 
-                        when (state) {
-                            DownloadState.IsDone -> "Download Done - ${load.name}"
-                            DownloadState.IsDownloading -> "Downloading ${load.name} - $extra"
-                            DownloadState.IsPaused -> "Paused ${load.name} - $extra"
-                            DownloadState.IsFailed -> "Error ${load.name} - $extra"
-                            DownloadState.IsStopped -> "Stopped ${load.name} - $extra"
-                            else -> throw NotImplementedError()
-                        }
-                    } else {
-                        when (state) {
-                            DownloadState.IsDone -> "Download Done - ${load.name}"
-                            DownloadState.IsDownloading -> "Downloading ${load.name}"
-                            DownloadState.IsPaused -> "Paused ${load.name}"
-                            DownloadState.IsFailed -> "Error ${load.name}"
-                            DownloadState.IsStopped -> "Stopped ${load.name}"
-                            else -> throw NotImplementedError()
-                        }
-                    }
-                )
-                .setSmallIcon(
-                    when (state) {
-                        DownloadState.IsDone -> R.drawable.rddone
-                        DownloadState.IsDownloading -> R.drawable.rdload
-                        DownloadState.IsPaused -> R.drawable.rdpause
-                        DownloadState.IsFailed -> R.drawable.rderror
-                        DownloadState.IsStopped -> R.drawable.rderror
-                        else -> throw NotImplementedError()
-                    }
-                )
-                .setContentIntent(pendingIntent)
 
-            if (state == DownloadState.IsDownloading && stateProgressState.total > 2) {
-                builder.setSubText("$timeFormat remaining")
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && posterUrl != null) {
+            context.getImageBitmapFromUrl(posterUrl)?.let { builder.setLargeIcon(it) }
+        }
 
-            if (state == DownloadState.IsDownloading || state == DownloadState.IsPaused) {
-                builder.setProgress(
-                    stateProgressState.total.toInt(),
-                    stateProgressState.progress.toInt(),
-                    stateProgressState.total <= 1
-                )
-            }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                load.posterUrl?.let { url ->
-                    val poster = context.getImageBitmapFromUrl(url)
-                    if (poster != null)
-                        builder.setLargeIcon(poster)
-                }
-            }
+        if (isActionable && (state == DownloadState.IsDownloading || state == DownloadState.IsPaused)) {
+            val actionTypes = if (state == DownloadState.IsDownloading)
+                listOf(DownloadActionType.Pause, DownloadActionType.Stop)
+            else
+                listOf(DownloadActionType.Resume, DownloadActionType.Stop)
 
-            if ((state == DownloadState.IsDownloading || state == DownloadState.IsPaused) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val actionTypes: MutableList<DownloadActionType> = ArrayList()
-                // INIT
-                if (state == DownloadState.IsDownloading) {
-                    actionTypes.add(DownloadActionType.Pause)
-                    actionTypes.add(DownloadActionType.Stop)
+            actionTypes.forEachIndexed { index, action ->
+                val resultIntent = Intent(context, DownloadNotificationService::class.java).apply {
+                    putExtra("type", action.name.lowercase())
+                    putExtra("id", id)
                 }
 
-                if (state == DownloadState.IsPaused) {
-                    actionTypes.add(DownloadActionType.Resume)
-                    actionTypes.add(DownloadActionType.Stop)
-                }
+                val pending: PendingIntent = PendingIntent.getService(
+                    context, 4337 + index + id, resultIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+                )
 
-                // ADD ACTIONS
-                for ((index, i) in actionTypes.withIndex()) {
-                    val resultIntent = Intent(context, DownloadNotificationService::class.java)
-
-                    resultIntent.putExtra(
-                        "type", when (i) {
-                            DownloadActionType.Resume -> "resume"
-                            DownloadActionType.Pause -> "pause"
-                            DownloadActionType.Stop -> "stop"
-                        }
+                builder.addAction(
+                    NotificationCompat.Action(
+                        when (action) {
+                            DownloadActionType.Resume -> R.drawable.rdload
+                            DownloadActionType.Pause -> R.drawable.rdpause
+                            DownloadActionType.Stop -> R.drawable.rderror
+                        },
+                        action.name, pending
                     )
-
-                    resultIntent.putExtra("id", id)
-
-                    val pending: PendingIntent =
-                        PendingIntent.getService(
-                            context, 4337 + index + id,
-                            resultIntent,
-                            PendingIntent.FLAG_UPDATE_CURRENT or
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                                        PendingIntent.FLAG_MUTABLE else 0
-                        )
-
-
-                    builder.addAction(
-                        NotificationCompat.Action(
-                            when (i) {
-                                DownloadActionType.Resume -> R.drawable.rdload
-                                DownloadActionType.Pause -> R.drawable.rdpause
-                                DownloadActionType.Stop -> R.drawable.rderror
-                            }, when (i) {
-                                DownloadActionType.Resume -> "Resume"
-                                DownloadActionType.Pause -> "Pause"
-                                DownloadActionType.Stop -> "Stop"
-                            }, pending
-                        )
-                    )
-                }
-            }
-
-            if (!hasCreatedNotChanel) {
-                context.createNotificationChannel()
-            }
-
-            with(NotificationManagerCompat.from(context)) {
-                // notificationId is a unique int for each notification that you must define
-                try {
-                    notify(id, builder.build())
-                } catch (t: Throwable) {
-                    logError(t)
-                }
+                )
             }
         }
+
+        if (!hasCreatedNotChanel) {
+            context.createNotificationChannel()
+        }
+
+        with(NotificationManagerCompat.from(context)) {
+            try {
+                notify(id, builder.build())
+            } catch (t: Throwable) {
+                logError(t)
+            }
+        }
+
     }
 }
 
@@ -1101,7 +1067,10 @@ object ImageDownloader {
     private val cachedBitmapMutex = Mutex()
     private val cachedBitmaps = hashMapOf<String, Bitmap>()
 
-    suspend fun Context.getImageBitmapFromUrl(url: String, headers: Map<String, String>? = null): Bitmap? {
+    suspend fun Context.getImageBitmapFromUrl(
+        url: String,
+        headers: Map<String, String>? = null
+    ): Bitmap? {
         try {
             with(cachedBitmapMutex) {
                 if (cachedBitmaps.containsKey(url)) {
@@ -1303,6 +1272,70 @@ object BookDownloader2 {
         deleteNovelAsync(author, name, apiName)
     }
 
+
+    suspend fun getOldDataReadingProgress(currentTabIndex: Int) {
+        val keys = getKeys(RESULT_BOOKMARK_STATE) ?: return
+        val readList = arrayListOf(
+            ReadType.READING,
+            ReadType.READING,
+            ReadType.ON_HOLD,
+            ReadType.PLAN_TO_READ,
+            ReadType.COMPLETED,
+            ReadType.DROPPED,
+        )
+        coroutineScope {
+            for (key in keys) {
+                val state = getKey<Int>(key)
+                if (state == readList[currentTabIndex].prefValue) {
+                    val id = key.replaceFirst(RESULT_BOOKMARK_STATE, RESULT_BOOKMARK)
+                    val cached = getKey<ResultCached>(id) ?: continue
+                    launch {
+                        getNewTotalChapters(cached)
+                    }
+                }
+            }
+        }
+    }
+
+
+    private val getNewTotalChaptersSemaphore = Semaphore(5)
+    suspend fun getNewTotalChapters(cached: ResultCached)
+    {
+        getNewTotalChaptersSemaphore.withPermit {
+            try
+            {
+                val api = getApiFromNameOrNull(cached.apiName) ?: return@withPermit
+                val response = api.load(cached.source, true)
+
+                if (response !is com.lagradost.quicknovel.mvvm.Resource.Success) return@withPermit
+                val loaded = response.value as? StreamResponse ?: return@withPermit
+
+                val totalChapters = loaded.data.size
+                if(totalChapters == cached.totalChapters) return@withPermit
+
+                setKey(
+                    RESULT_BOOKMARK,
+                    cached.id.toString(),
+                    cached.copy(
+                        totalChapters = totalChapters,
+                    )
+                )
+
+                val newId = generateId(loaded, cached.apiName)
+                if(cached.id != newId){
+                    migrationNovelMutex.withLock {
+                        migrateKeys(cached.id,
+                            newId,
+                            cached.name,
+                            loaded.name)
+                    }
+                }
+            } catch (e: Throwable) {
+                if (e !is CancellationException) logError(e)
+            }
+        }
+    }
+
     @WorkerThread
     @Throws
     private fun turnToEpub(
@@ -1406,12 +1439,15 @@ object BookDownloader2 {
         id: Int,
         load: LoadResponse,
         stateProgressState: DownloadProgressState,
-        show: Boolean = true,
         progressInBytes: Boolean = false
     ) {
         NotificationHelper.createNotification(
             activity,
-            load.url, id, load, stateProgressState, show, progressInBytes
+            load.url, id,
+            load.name,
+            load.posterUrl,
+            stateProgressState,
+            progressInBytes
         )
     }
 
@@ -1435,7 +1471,6 @@ object BookDownloader2 {
                 lastUpdatedMs = System.currentTimeMillis()
             }
         }
-
         downloadProgressChanged.invoke(id to (data ?: return null))
         return data
     }
@@ -1508,7 +1543,7 @@ object BookDownloader2 {
     suspend fun downloadWorkThread(
         card: DownloadFragment.DownloadDataLoaded,
     ) {
-        if(card.isImported) {
+        if (card.isImported) {
             return
         }
 
@@ -1697,11 +1732,385 @@ object BookDownloader2 {
     const val LOCAL_EPUB: String = "local_epub.epub"
     const val LOCAL_EPUB_MIN_SIZE: Long = 1000
 
+    //to avoid img headers or icons
+    val MIN_IMAGE_SIZE = 30 * 1024
+
+
+    private fun createHtmlWrapper(title: String, content: String): String {
+        return """
+        <html xmlns="http://www.w3.org/1999/xhtml">
+            <head><meta charset="utf-8"/><title>$title</title></head>
+            <body>
+                $content
+            </body>
+        </html>
+    """.trimIndent()
+    }
+
+
+    //Import pdf area -----------------------------------------------
+    private suspend fun handleDownloadActions(
+        id: Int,
+        load: EpubResponse,
+        current: DownloadState
+    ): DownloadState {
+        val action = consumeAction(id)
+        val newState = when (action) {
+            DownloadActionType.Pause -> DownloadState.IsPaused
+            DownloadActionType.Resume -> DownloadState.IsDownloading
+            DownloadActionType.Stop -> DownloadState.IsStopped
+            else -> current
+        }
+        if (newState != current || newState == DownloadState.IsPaused) updateDownloadNotificationState(
+            id,
+            load,
+            newState
+        )
+        return newState
+    }
+
+    private suspend fun updateDownloadNotificationState(
+        id: Int,
+        load: EpubResponse,
+        state: DownloadState,
+        progress: Int? = null
+    ) {
+        changeDownload(id) {
+            this.state = state
+            progress?.let {
+                this.progress = it.toLong()
+                this.downloaded = it.toLong()
+            }
+        }?.let { createNotification(id, load, it) }
+    }
+
+    fun pdfPageWithoutHAndF(page: PDPage, stripper: PDFTextStripperByArea): String {
+        //try to delete footer and header
+        val percentajeToDelete = 0.03f//3%
+        val mediaBox = page.mediaBox
+        val fullHeight = mediaBox.height
+        val marginHeight = fullHeight * percentajeToDelete
+        val bodyArea = RectF(
+            mediaBox.lowerLeftX,
+            marginHeight,
+            mediaBox.upperRightX,
+            fullHeight - (marginHeight * 2)
+        )
+        stripper.addRegion("body", bodyArea)
+        stripper.extractRegions(page)
+        return stripper.getTextForRegion("body")
+    }
+
+    private fun processImageObject(
+        imageXObject: PDImageXObject,
+        tempFolder: File,
+        chapterBuilder: StringBuilder,
+        api: String, author: String, name: String,
+        filesDir: File,
+        count: Int
+    ): Boolean? {
+        val bitmap = imageXObject.image
+        if (!bitmap.isRecycled) {
+            try {
+                val outStream = ByteArrayOutputStream()
+
+                //get image compressed as byteArray
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, outStream)
+                val imgBytes = outStream.toByteArray()
+
+                // only over NKB images
+                if (imgBytes.size >= MIN_IMAGE_SIZE) {
+
+                    val imgHref = "img_$count.jpeg"
+                    File(tempFolder, imgHref).writeBytes(imgBytes).also {
+                        chapterBuilder.append("<div style='text-align:center;'><img src=\"$imgHref\" style='max-width:100%;'/></div>")
+
+                        //if it’s the first image, save it as the cover
+                        if (count == 1) {
+                            val filepath = BookDownloader2Helper.getFilenameIMG(api, author, name)
+                            File(filesDir, filepath).apply {
+                                parentFile?.mkdirs()
+                                writeBytes(imgBytes)
+                            }
+                        }
+                    }
+
+                    return true
+                }
+            } catch (e: Exception) {
+                logError(e)
+            } finally {
+                if (!bitmap.isRecycled) bitmap.recycle() //delete from ram
+            }
+        }
+        return null
+    }
+
+    //init imports
+    @WorkerThread
+    @Throws
+    suspend fun downloadPDFWorkThread(data: Uri, context: Context?) {
+        if (context == null)
+            return
+
+        //init pdf reader
+        if (!PDFBoxResourceLoader.isReady())
+            PDFBoxResourceLoader.init(context)
+
+        // open file
+        val document: PDDocument =
+            context.contentResolver.openInputStream(data).use { inputStream ->
+                PDDocument.load(inputStream)
+            } ?: run {
+                showToast(R.string.failed, Toast.LENGTH_LONG)
+                return
+            }
+
+        //get info
+        val info = document.documentInformation
+        val author =
+            if (info.author.isNullOrBlank()) context.getString(R.string.unknown) else info.author
+        val fileName =
+            SafeFile.fromUri(context, data)?.name() ?: context.getString(R.string.unknown)
+        val name = fileName.removeSuffix(".pdf").removeSuffix(".PDF")
+        val apiName = IMPORT_SOURCE_PDF
+
+        //sanitize info
+        val sAuthor = BookDownloader2Helper.sanitizeFilename(author)
+        val sName = BookDownloader2Helper.sanitizeFilename(name)
+        val id = generateId(apiName, sAuthor, sName)
+
+
+        //where to save the file
+        val fileDir = context.filesDir
+        val finalEpubFile = File(File(fileDir, getDirectory(apiName, sAuthor, sName)), LOCAL_EPUB)
+        val tempFolder = File(context.cacheDir, "temp_$id")
+        val load = EpubResponse(
+            url = data.toString(),
+            name = sName,
+            apiName = apiName,
+            author = sAuthor,
+            downloadLinks = emptyList(),
+            downloadExtractLinks = emptyList(),
+        )
+
+        try {
+
+            var chapterCount = 1
+            var imageCount = 1
+            var pageIdx = 1
+            //create sections of N pages
+            val pagesPerChapter = 10
+            val totalPages = document.numberOfPages
+            var currentState = DownloadState.IsDownloading
+            //to get text from pdf pages
+            val stripper = PDFTextStripperByArea()
+            //to create content of the chapter
+            val currentChapterText = StringBuilder()
+
+
+            //if already in progress, get info
+            if (tempFolder.exists()) {
+                val xhtmlFiles = tempFolder.listFiles { _, name -> name.endsWith(".xhtml") }
+                val imageFiles = tempFolder.listFiles { _, name -> name.endsWith(".jpeg") }
+                chapterCount = (xhtmlFiles?.size ?: 0) + 1
+                imageCount = (imageFiles?.size ?: 0) + 1
+                pageIdx = ((chapterCount - 1) * pagesPerChapter) + 1
+            } else//create files
+                tempFolder.mkdirs()
+
+
+            setPrefixData(
+                load,
+                apiName,
+                ((totalPages + pagesPerChapter - 1) / pagesPerChapter).toLong().coerceAtLeast(1L),
+                0L
+            )
+            changeDownload(id) {
+                state = currentState
+                this.progress = chapterCount.toLong() - 1
+                this.downloaded = chapterCount.toLong() - 1
+            }?.let { createNotification(id, load, it) }
+
+
+            //prototype of book
+            val book = EpubBook().apply {
+                metadata.addTitle(sName)
+                metadata.addAuthor(Author(sAuthor))
+            }
+
+            //Necessary so the system recognizes the existing book
+            finalEpubFile.parentFile?.mkdirs()
+            if (!finalEpubFile.exists()) {
+                FileOutputStream(finalEpubFile).use { fos ->
+                    EpubWriter().write(book, fos)
+                }
+            }
+
+            //init progress
+            while (true) {
+                //check notification options
+                currentState = handleDownloadActions(id, load, currentState)
+                if (currentState == DownloadState.IsPaused) {
+                    delay(200)
+                    continue
+                } else if (currentState == DownloadState.IsStopped)
+                    break
+
+                val page = document.getPage(pageIdx - 1)
+                val bodyText = pdfPageWithoutHAndF(page, stripper)
+
+                //if there's text, include
+                if (bodyText.isNotBlank())
+                    currentChapterText.append(bodyText.textToHtmlChapter())
+
+                //get and save images from page
+                val resources = page.resources
+                for (objName in resources.xObjectNames)
+                    if (resources.isImageXObject(objName))//is necessary for correct imageCount
+                        processImageObject(
+                            resources.getXObject(objName) as PDImageXObject,
+                            tempFolder,
+                            currentChapterText,
+                            apiName, sAuthor, sName,
+                            fileDir,
+                            imageCount
+                        )?.let { imageCount++ }
+
+                // collect N pages as sections to chapters
+                if (pageIdx % pagesPerChapter == 0 || pageIdx == totalPages) {
+                    val sectionTitle = "${context.getString(R.string.chapter)} $chapterCount"
+                    val htmlContent = createHtmlWrapper(sectionTitle, currentChapterText.toString())
+
+                    //add chapter to the book
+                    File(tempFolder, "chapter$chapterCount.xhtml").writeText(htmlContent)
+
+                    //change notifications
+                    //import still in progress
+                    if (pageIdx < totalPages) {
+                        changeDownload(id) {
+                            this.progress = chapterCount.toLong()
+                            this.downloaded = chapterCount.toLong()
+                        }?.let {
+                            createNotification(id, load, it)
+                        }
+                    } else //finally
+                    {
+                        currentState = DownloadState.IsDone
+                        break
+                    }
+
+                    //next chapter
+                    currentChapterText.clear()
+                    chapterCount++
+                }
+                pageIdx++
+
+            }
+
+            if (currentState == DownloadState.IsDone) {
+                //add imgs to book
+                tempFolder.listFiles()?.let {
+                    for ((i, file) in it.withIndex())
+                        if (file.name.contains("img_")) {
+                            val res = Resource(file.readBytes(), file.name)
+                            book.addResource(res)
+                            if (i == 0) book.coverImage = res
+                        }
+                }
+
+                //use twice, to sort chapters
+                tempFolder.listFiles { _, name -> name.startsWith("chapter") }?.sortedBy {
+                    it.name.filter { char -> char.isDigit() }.toInt()
+                }?.forEach { file ->
+                    val res = Resource(file.readBytes(), file.name)
+                    book.addSection(
+                        "Section ${
+                            file.name.replace("chapter", "").replace(".xhtml", "")
+                        }", res
+                    )
+                }
+
+                //save all the book
+                FileOutputStream(finalEpubFile).use { fos ->
+                    EpubWriter().write(book, fos)
+                }
+                setSuffixData(load, apiName)
+
+
+                changeDownload(id) {
+                    state = DownloadState.IsDone
+                    this.progress = this.total
+                    this.downloaded = this.total
+                }?.let { createNotification(id, load, it) }
+            } else {
+                changeDownload(id) {
+                    state = DownloadState.IsStopped
+                }?.let { createNotification(id, load, it) }
+            }
+        } catch (t: Throwable) {
+            logError(t)
+            changeDownload(id) {
+                state = DownloadState.IsFailed
+            }?.let { createNotification(id, load, it) }
+        } finally {
+            document.close()
+            currentDownloadsMutex.withLock { currentDownloads -= id }
+            //delete temp
+            tempFolder.deleteRecursively()
+        }
+    }
+
+    fun preloadPartialImportedPdf(bk: DownloadFragment.DownloadDataLoaded, context: Context) {
+        try {
+            val finalBook = File(
+                File(context.filesDir, getDirectory(bk.apiName, bk.author ?: "", bk.name)),
+                LOCAL_EPUB
+            )
+            if (finalBook.exists()) finalBook.delete()
+            val tempFolder = File(context.cacheDir, "temp_${bk.id}")
+            val book = EpubBook().apply {
+                metadata.addTitle(bk.name)
+                metadata.addAuthor(Author(bk.author))
+            }
+            tempFolder.listFiles()?.let {
+                for ((i, file) in it.withIndex())
+                    if (file.name.contains("img_")) {
+                        val res = Resource(file.readBytes(), file.name)
+                        book.addResource(res)
+                        if (i == 0) book.coverImage = res
+                    }
+            }
+
+            //use twice, to sort chapters
+            tempFolder.listFiles { _, name -> name.startsWith("chapter") }?.sortedBy {
+                it.name.filter { char -> char.isDigit() }.toInt()
+            }?.forEach { file ->
+                val res = Resource(file.readBytes(), file.name)
+                book.addSection(
+                    "Chapter ${file.name.replace("chapter", "").replace(".xhtml", "")}",
+                    res
+                )
+            }
+
+            finalBook.parentFile?.mkdirs()
+            //save all the book
+            FileOutputStream(finalBook).use { fos ->
+                EpubWriter().write(book, fos)
+            }
+        } catch (t: Throwable) {
+            logError(t)
+        }
+    }
+
+
+    //Import epubs area -----------------------------------------------
     @WorkerThread
     @Throws
     suspend fun downloadWorkThread(data: Uri, context: Context) {
         val filesDir = activity?.filesDir ?: return
-        val fd = context.contentResolver.openFileDescriptor(data, "r")
+        val contentResolver = context.contentResolver
+        val fd = contentResolver.openFileDescriptor(data, "r")
             ?: throw ErrorLoadingException("Unable to open file descriptor")
         val zipFile = AndroidZipFile(fd, "")
         val book = EpubReader().readEpubLazy(zipFile, "utf-8")
@@ -1710,7 +2119,18 @@ object BookDownloader2 {
         val author = book.metadata.authors.firstOrNull()
             ?.let { "${it.firstname ?: ""} ${it.lastname}".trim() }
         val apiName = IMPORT_SOURCE
-        val name = book.metadata.firstTitle ?: ""
+
+        //If it doesn’t have a cover, it’s most likely another file that was converted into EPUB, so all the metadata will be wrong. That’s why I use the file name instead of the metadata.
+        val name = if (book.coverImage?.data != null) book.metadata.firstTitle
+        else {
+            contentResolver.query(data, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (cursor.moveToFirst())
+                    cursor.getString(nameIndex).substringBeforeLast(".")
+                else null
+            } ?: book.metadata.firstTitle
+        }
+
         val sApiName = BookDownloader2Helper.sanitizeFilename(apiName)
         val sAuthor = BookDownloader2Helper.sanitizeFilename(author ?: "")
         val sName = BookDownloader2Helper.sanitizeFilename(name)
@@ -1731,7 +2151,26 @@ object BookDownloader2 {
             setPrefixData(load, apiName, 1L, 0L)
 
             try {
-                val coverBytes = book.coverImage?.data
+                var coverBytes = book.coverImage?.data
+
+                //This is for epubs imported from PDFs that don’t have correct metadata.
+                if (coverBytes == null) {
+                    zipFile.entries().asSequence()
+                        .find { entry ->
+                            entry.size >= MIN_IMAGE_SIZE &&
+                                    listOf(".jpg", ".jpeg", ".png").any {
+                                        entry.name.endsWith(
+                                            it,
+                                            ignoreCase = true
+                                        )
+                                    }
+                        }?.let { entry ->
+                            coverBytes = zipFile.getInputStream(entry).use { it.readBytes() }
+                        }
+                }
+
+
+
                 if (coverBytes != null) {
                     // Store the image and override it
                     val filepath = BookDownloader2Helper.getFilenameIMG(sApiName, sAuthor, sName)
@@ -1741,6 +2180,7 @@ object BookDownloader2 {
                     pFile.parentFile?.mkdirs()
                     pFile.writeBytes(coverBytes)
                 }
+
             } catch (t: Throwable) {
                 logError(t)
             }
@@ -2017,7 +2457,8 @@ object BookDownloader2 {
         api: APIRepository,
         range: ClosedRange<Int>
     ) {
-        val filesDir = activity?.filesDir ?: return
+        val context = activity ?: return
+        val filesDir = context.filesDir
         val sApiName = BookDownloader2Helper.sanitizeFilename(api.name)
         val sAuthor =
             BookDownloader2Helper.sanitizeFilename(load.author ?: "")
@@ -2078,10 +2519,9 @@ object BookDownloader2 {
                         index
                     )
                 val rFile = File(filepath)
-                if (rFile.exists()) {
-                    if (rFile.length() > 10) { // TO PREVENT INVALID FILE FROM HAVING TO REMOVE EVERYTHING
-                        continue
-                    }
+                // TO PREVENT INVALID FILE FROM HAVING TO REMOVE EVERYTHING
+                if (rFile.exists() && rFile.length() > 10) {
+                    continue
                 }
 
                 val beforeDownloadTime = System.currentTimeMillis()
@@ -2156,11 +2596,11 @@ object BookDownloader2 {
             }
         } catch (t: Throwable) {
             // also set it here in case of exception
+            logError(t)
+            changeDownload(id) { state = DownloadState.IsFailed }
             if (downloadedTotal > 0) {
                 setSuffixData(load, api.name)
             }
-
-            logError(t)
         } finally {
             currentDownloadsMutex.withLock {
                 currentDownloads -= id

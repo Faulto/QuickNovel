@@ -48,9 +48,12 @@
 
     <string name="filter_dialog_sort_by">Sırala</string>
     <string name="filter_dialog_filter">Uygula</string>
-    <string name="filter_dialog_general">Genel:</string>
-    <string name="filter_dialog_order_by">Sıralama ölçütü:</string>
-    <string name="filter_dialog_genre">Tür:</string>
+    <string name="filter_dialog_general">Genel</string>
+    <string name="filter_dialog_order_by">Sıralama ölçütü</string>
+    <string name="filter_dialog_genre">Tür</string>
+    <string name="library_filter_unread_only">Yalnızca okunmamış</string>
+    <string name="library_filter_not_started">Başlanmamış</string>
+    <string name="library_filter_completed_only">Yalnızca tamamlanmış romanlar</string>
     <string name="browse_list_icon">Simge</string>
     <string name="home_title_text">Keşfet</string>
     <string name="mainpage_filter">Filtre</string>
@@ -95,6 +98,9 @@
     <string name="type_dropped">Terk Edildi</string>
     <string name="type_plan_to_read">Okumayı Planla</string>
     <string name="type_none">Hiçbiri</string>
+    <string name="type_trash">Çöp Kutusu</string>
+    <string name="progress_downloaded">İndirildi</string>
+    <string name="progress_read">Okundu</string>
 
     <string name="read_display_settings">Ayarlar</string>
     <string name="read_text_size">Metin</string>
@@ -203,6 +209,7 @@
     <string name="download_sort_lh">"İndirme sayısı (düşükten yükseğe)"</string>
     <string name="download_perc_hl">İndirme yüzdesi (yüksekten düşüğe)</string>
     <string name="download_perc_lh">İndirme yüzdesi (düşükten yükseğe)</string>
+    <string name="unread_chapter_sort">Okunmamış bölümler</string>
     <string name="reload_chapter_format">Bölüm %s yeniden yükleniyor</string>
     <string name="ok">Tamam</string>
     <string name="more_info">Daha Fazla Bilgi</string>

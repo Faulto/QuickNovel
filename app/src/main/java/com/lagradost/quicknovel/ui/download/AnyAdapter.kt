@@ -8,12 +8,11 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.LinearLayout
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
-import androidx.lifecycle.viewModelScope
-import com.lagradost.quicknovel.BaseApplication.Companion.getKeys
 import com.lagradost.quicknovel.BaseApplication.Companion.getKey
+import com.lagradost.quicknovel.BookDownloader2.preloadPartialImportedPdf
+import com.lagradost.quicknovel.BookDownloader2Helper.IMPORT_SOURCE_PDF
 import com.lagradost.quicknovel.DOWNLOAD_EPUB_SIZE
 import com.lagradost.quicknovel.DownloadState
-import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_READ_AT
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.databinding.DownloadImportBinding
 import com.lagradost.quicknovel.databinding.DownloadImportCardBinding
@@ -23,16 +22,12 @@ import com.lagradost.quicknovel.databinding.HistoryResultCompactBinding
 import com.lagradost.quicknovel.ui.BaseDiffCallback
 import com.lagradost.quicknovel.ui.NoStateAdapter
 import com.lagradost.quicknovel.ui.ViewHolderState
+import com.lagradost.quicknovel.ui.newSharedPool
 import com.lagradost.quicknovel.util.ResultCached
 import com.lagradost.quicknovel.util.SettingsHelper.getDownloadIsCompact
+import com.lagradost.quicknovel.util.UIHelper.hideKeyboard
 import com.lagradost.quicknovel.util.UIHelper.setImage
 import com.lagradost.quicknovel.widget.AutofitRecyclerView
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
 class AnyAdapter(
@@ -41,47 +36,26 @@ class AnyAdapter(
 ) : NoStateAdapter<Any>(
     diffCallback = BaseDiffCallback(
         itemSame = { a, b ->
-            a.hashCode() == b.hashCode()
+            if (a is ResultCached && b is ResultCached) {
+                a.source == b.source
+            } else if (a is DownloadFragment.DownloadDataLoaded && b is DownloadFragment.DownloadDataLoaded) {
+                a.id == b.id//if you use .source, when you delete a novel, this crashes
+            } else {
+                false
+            }
         },
         contentSame = { a, b ->
             a == b
         }
     )
 ) {
-    private val readCountByNovelKey: ConcurrentHashMap<String, Int> = ConcurrentHashMap()
-    private val readIndexMutex = Mutex()
-    @Volatile private var readIndexBuilt: Boolean = false
-
-    private fun normalizeNovelKey(name: String): String {
-        return name.lowercase().replace("\\s+".toRegex(), " ").trim()
-    }
-
-    private suspend fun ensureReadIndex() {
-        if (readIndexBuilt) return
-        readIndexMutex.withLock {
-            if (readIndexBuilt) return
-
-            readCountByNovelKey.clear()
-            val keys = getKeys(EPUB_CURRENT_POSITION_READ_AT) ?: emptyList()
-            val prefix = "$EPUB_CURRENT_POSITION_READ_AT/"
-            for (fullKey in keys) {
-                if (!fullKey.startsWith(prefix)) continue
-                val rest = fullKey.removePrefix(prefix)
-                val novelName = rest.substringBefore('/')
-                if (novelName.isBlank()) continue
-                val novelKey = normalizeNovelKey(novelName)
-                readCountByNovelKey[novelKey] = (readCountByNovelKey[novelKey] ?: 0) + 1
+    companion object {
+        val sharedPool =
+            newSharedPool {
+                setMaxRecycledViews(RESULT_CACHED, 20)
+                setMaxRecycledViews(DOWNLOAD_DATA_LOADED, 20)
             }
 
-            readIndexBuilt = true
-        }
-    }
-
-    private fun formatBadgeCount(count: Int): String {
-        return if (count > 9999) "9999+" else count.toString()
-    }
-
-    companion object {
         const val RESULT_CACHED: Int = 1
         const val DOWNLOAD_DATA_LOADED: Int = 2
     }
@@ -94,11 +68,12 @@ class AnyAdapter(
         }
     }
 
+
     override fun onCreateFooter(parent: ViewGroup): ViewHolderState<Any> {
         val compact = parent.context.getDownloadIsCompact()
 
         return ViewHolderState(
-            if(compact) {
+            if (compact) {
                 DownloadImportBinding.inflate(
                     LayoutInflater.from(parent.context),
                     parent,
@@ -111,18 +86,19 @@ class AnyAdapter(
                     false
                 )
             }
-
         )
     }
 
     override fun onClearView(holder: ViewHolderState<Any>) {
-        when(val binding = holder.view) {
+        when (val binding = holder.view) {
             is DownloadResultGridBinding -> {
                 clearImage(binding.imageView)
             }
+
             is HistoryResultCompactBinding -> {
                 clearImage(binding.imageView)
             }
+
             is DownloadResultCompactBinding -> {
                 clearImage(binding.imageView)
             }
@@ -130,12 +106,13 @@ class AnyAdapter(
     }
 
     override fun onBindFooter(holder: ViewHolderState<Any>) {
-        when(val binding = holder.view) {
+        when (val binding = holder.view) {
             is DownloadImportBinding -> {
                 binding.backgroundCard.setOnClickListener {
                     downloadViewModel.importEpub()
                 }
             }
+
             is DownloadImportCardBinding -> {
                 binding.backgroundCard.apply {
                     setOnClickListener {
@@ -198,25 +175,16 @@ class AnyAdapter(
             is HistoryResultCompactBinding -> {
                 val card = item as ResultCached
                 view.apply {
+                    val readCount = card.lastChapterRead.coerceAtLeast(0)
                     imageText.text = card.name
-                    historyExtraText.text = "${card.totalChapters} Chapters"
+                    historyExtraText.text =
+                        "$readCount/${card.currentTotalChapters} ${
+                            root.context.getString(
+                                R.string.read_action_chapters
+                            )
+                        }"
+
                     imageView.setImage(card.poster)
-
-                    unreadBadge.isGone = true
-                    val bindToken = card.id
-                    unreadBadge.tag = bindToken
-                    downloadViewModel.viewModelScope.launch {
-                        val unread = withContext(Dispatchers.IO) {
-                            ensureReadIndex()
-                            val read = readCountByNovelKey[normalizeNovelKey(card.name)] ?: 0
-                            (card.totalChapters - read).coerceAtLeast(0)
-                        }
-
-                        if (unreadBadge.tag == bindToken && unread > 0) {
-                            unreadBadge.text = formatBadgeCount(unread)
-                            unreadBadge.isGone = false
-                        }
-                    }
 
                     historyPlay.setOnClickListener {
                         downloadViewModel.stream(card)
@@ -227,7 +195,8 @@ class AnyAdapter(
                     historyDelete.setOnClickListener {
                         downloadViewModel.deleteAlert(card)
                     }
-                    imageView.setOnLongClickListener {
+                    imageView.setOnLongClickListener { view ->
+                        hideKeyboard(view)
                         downloadViewModel.showMetadata(card)
                         return@setOnLongClickListener true
                     }
@@ -245,9 +214,16 @@ class AnyAdapter(
                                     coverHeight
                                 )
                                 setOnClickListener {
+                                    if (item.apiName == IMPORT_SOURCE_PDF && item.downloadedCount < item.downloadedTotal) {
+                                        preloadPartialImportedPdf(item, context)
+                                        if (item.state != DownloadState.IsDownloading && item.state != DownloadState.IsPaused) {
+                                            downloadViewModel.refreshCard(item)
+                                        }
+                                    }
                                     downloadViewModel.readEpub(item)
                                 }
-                                setOnLongClickListener {
+                                setOnLongClickListener { view ->
+                                    hideKeyboard(view)
                                     downloadViewModel.showMetadata(item)
                                     return@setOnLongClickListener true
                                 }
@@ -255,20 +231,29 @@ class AnyAdapter(
 
                             downloadProgressbarIndeterment.isVisible = item.generating
                             val showDownloadLoading = item.state == DownloadState.IsPending
+
+                            val isAPdfDownloading =
+                                item.apiName == IMPORT_SOURCE_PDF && (item.downloadedTotal != item.downloadedCount)
                             downloadUpdateLoading.isVisible =
-                                showDownloadLoading && !item.isImported
+                                showDownloadLoading || isAPdfDownloading
 
                             val epubSize = getKey(DOWNLOAD_EPUB_SIZE, item.id.toString()) ?: 0
                             val diff = item.downloadedCount - epubSize
                             imageTextMore.text = "+$diff "
-                            imageTextMore.isVisible = diff > 0 && !showDownloadLoading && !item.isImported
+                            imageTextMore.isVisible =
+                                diff > 0 && !showDownloadLoading && !item.isImported
                             imageText.text = item.name
+
+                            imageView.alpha = if (isAPdfDownloading) 0.6f else 1.0f
                             imageView.setImage(item.image)
+
+                            progressReading.isVisible = false
                         }
                     }
 
                     is ResultCached -> {
                         view.apply {
+                            val readCount = item.lastChapterRead.coerceAtLeast(0)
                             backgroundCard.apply {
                                 val coverHeight: Int = (resView.itemWidth / 0.68).roundToInt()
                                 layoutParams = LinearLayout.LayoutParams(
@@ -278,33 +263,21 @@ class AnyAdapter(
                                 setOnClickListener {
                                     downloadViewModel.load(item)
                                 }
-                                setOnLongClickListener {
+                                setOnLongClickListener { view ->
+                                    hideKeyboard(view)
                                     downloadViewModel.showMetadata(item)
                                     return@setOnLongClickListener true
                                 }
                             }
-
-                            unreadBadge.isGone = true
-                            val bindToken = item.id
-                            unreadBadge.tag = bindToken
-                            downloadViewModel.viewModelScope.launch {
-                                val unread = withContext(Dispatchers.IO) {
-                                    ensureReadIndex()
-                                    val read = readCountByNovelKey[normalizeNovelKey(item.name)] ?: 0
-                                    (item.totalChapters - read).coerceAtLeast(0)
-                                }
-
-                                if (unreadBadge.tag == bindToken && unread > 0) {
-                                    unreadBadge.text = formatBadgeCount(unread)
-                                    unreadBadge.isGone = false
-                                }
-                            }
-
                             imageView.setImage(
                                 item.image,
                             ) // skipCache = false
+
                             imageText.text = item.name
                             imageTextMore.isVisible = false
+
+                            progressReading.text =
+                                "$readCount/${item.currentTotalChapters}"
                         }
                     }
 
@@ -315,13 +288,17 @@ class AnyAdapter(
             is DownloadResultCompactBinding -> {
                 val card = item as DownloadFragment.DownloadDataLoaded
                 view.apply {
-                    downloadHolder.isGone = card.isImported
+                    downloadHolder.isGone =
+                        card.isImported && (card.apiName != IMPORT_SOURCE_PDF || card.downloadedTotal == card.downloadedCount)
                     val same = imageText.text == card.name
                     backgroundCard.apply {
                         setOnClickListener {
+                            if (card.apiName == IMPORT_SOURCE_PDF && card.downloadedCount < card.downloadedTotal)
+                                preloadPartialImportedPdf(card, context)
                             downloadViewModel.readEpub(card)
                         }
-                        setOnLongClickListener {
+                        setOnLongClickListener { view ->
+                            hideKeyboard(view)
                             downloadViewModel.showMetadata(card)
                             return@setOnLongClickListener true
                         }
@@ -331,7 +308,8 @@ class AnyAdapter(
                             if (!item.isImported)
                                 downloadViewModel.load(card)
                         }
-                        setOnLongClickListener {
+                        setOnLongClickListener { view ->
+                            hideKeyboard(view)
                             downloadViewModel.showMetadata(card)
                             return@setOnLongClickListener true
                         }
@@ -354,7 +332,7 @@ class AnyAdapter(
                         max = card.downloadedTotal.toInt() * 100
 
                         // shitty check for non changed
-                        if (same) {
+                        if (same || imageText.text.isEmpty()) {//the first time, imageText.text is empty
                             val animation: ObjectAnimator = ObjectAnimator.ofInt(
                                 this,
                                 "progress",
@@ -409,7 +387,7 @@ class AnyAdapter(
                             DownloadState.IsDownloading -> downloadViewModel.pause(card)
                             DownloadState.IsPaused -> downloadViewModel.resume(card)
                             DownloadState.IsPending -> {}
-                            else -> downloadViewModel.refreshCard(card)
+                            else -> downloadViewModel.refreshCard(card)//this also resume download of imported pdfs
                         }
                     }
 

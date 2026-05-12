@@ -1,22 +1,22 @@
 package com.lagradost.quicknovel.ui.result
 
 import android.animation.ObjectAnimator
+import android.annotation.SuppressLint
 import android.content.DialogInterface
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
-import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import androidx.appcompat.app.AlertDialog
 import androidx.coordinatorlayout.widget.CoordinatorLayout
-import androidx.core.view.isGone
+import androidx.core.view.doOnNextLayout
 import androidx.core.view.isVisible
+import androidx.core.view.postDelayed
 import androidx.core.widget.NestedScrollView
 import androidx.core.widget.doOnTextChanged
-import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.recyclerview.widget.GridLayoutManager
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -36,11 +36,14 @@ import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.debugException
 import com.lagradost.quicknovel.mvvm.observe
 import com.lagradost.quicknovel.mvvm.observeNullable
+import com.lagradost.quicknovel.ui.BaseFragment
 import com.lagradost.quicknovel.ui.ReadType
 import com.lagradost.quicknovel.ui.SortingMethodAdapter
-import com.lagradost.quicknovel.ui.mainpage.MainAdapter2
+import com.lagradost.quicknovel.ui.mainpage.MainAdapter
 import com.lagradost.quicknovel.ui.mainpage.MainPageFragment
+import com.lagradost.quicknovel.ui.setRecycledViewPool
 import com.lagradost.quicknovel.util.SettingsHelper.getRating
+import com.lagradost.quicknovel.util.SingleSelectionHelper.showBottomDialog
 import com.lagradost.quicknovel.util.UIHelper
 import com.lagradost.quicknovel.util.UIHelper.colorFromAttribute
 import com.lagradost.quicknovel.util.UIHelper.fixPaddingStatusbar
@@ -54,8 +57,9 @@ import com.lagradost.quicknovel.util.toPx
 
 const val MAX_SYNO_LENGH = 300
 
-class ResultFragment : Fragment() {
-    lateinit var binding: FragmentResultBinding
+class ResultFragment : BaseFragment<FragmentResultBinding>(
+    BindingCreator.Inflate(FragmentResultBinding::inflate)
+) {
     private val viewModel: ResultViewModel by viewModels()
 
     companion object {
@@ -69,49 +73,35 @@ class ResultFragment : Fragment() {
 
     }
 
-
-    //private lateinit var viewModel: ResultViewModel
-
-    val repo get() = viewModel.repo
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?,
-    ): View {
-        binding = FragmentResultBinding.inflate(inflater)
-        return binding.root
-        //viewModel =
-        //    ViewModelProvider(this).get(ResultViewModel::class.java)
-        /*activity?.window?.setSoftInputMode(
-            WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
-        )*/
-
-        //return inflater.inflate(R.layout.fragment_result, container, false)
-    }
-
-    private fun setupGridView() {
+    override fun fixLayout(view: View) {
         val compactView = false //activity?.getGridIsCompact() ?: return
         val spanCountLandscape = if (compactView) 2 else 6
         val spanCountPortrait = if (compactView) 1 else 3
         val orientation = resources.configuration.orientation
         if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            binding.relatedList.spanCount = spanCountLandscape
+            binding?.relatedList?.spanCount = spanCountLandscape
         } else {
-            binding.relatedList.spanCount = spanCountPortrait
+            binding?.relatedList?.spanCount = spanCountPortrait
         }
-    }
-
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        setupGridView()
-        binding.resultHolder.post { // BUG FIX
+        binding?.resultHolder?.post { // BUG FIX
             updateScrollHeight()
         }
     }
 
+    //private lateinit var viewModel: ResultViewModel
+
+    val repo get() = viewModel.repo
+
+
+    @SuppressLint("NotifyDataSetChanged")
     override fun onResume() {
         super.onResume()
+        //only if really is onResume
+        if (viewModel.isResume) {
+            (binding?.chapterList?.adapter as? ChapterAdapter)?.notifyDataSetChanged()
+            viewModel.updateReadCount()
+            viewModel.isResume = false
+        }
 
         activity?.apply {
             window?.navigationBarColor =
@@ -120,9 +110,9 @@ class ResultFragment : Fragment() {
     }
 
     private fun updateScrollHeight() {
+        val binding = binding ?: return
         val displayMetrics = context?.resources?.displayMetrics ?: return
-        val height = binding.resultDownloadCard.height
-        val total = displayMetrics.heightPixels - height
+        val total = displayMetrics.heightPixels - binding.resultDownloadCard.height
 
         binding.resultNovelHolder.apply {
             setPadding(
@@ -148,9 +138,39 @@ class ResultFragment : Fragment() {
         }*/
     }
 
+    private fun animateProgress(progressBar: ProgressBar, total: Int, progress: Int) {
+        val safeTotal = total.coerceAtLeast(1)
+        val target = progress.coerceIn(0, safeTotal) * 100
+        progressBar.max = safeTotal * 100
+
+        val animation: ObjectAnimator = ObjectAnimator.ofInt(
+            progressBar,
+            "progress",
+            progressBar.progress,
+            target
+        )
+        animation.duration = 500
+        animation.setAutoCancel(true)
+        animation.interpolator = DecelerateInterpolator()
+        animation.start()
+    }
+
+    private fun updateProgressLayering(
+        binding: FragmentResultBinding,
+        downloadProgress: Int,
+        readProgress: Int
+    ) {
+        if (readProgress <= downloadProgress) {
+            binding.resultReadProgressBar.bringToFront()
+        } else {
+            binding.resultDownloadProgressBar.bringToFront()
+        }
+    }
+
 
     private fun newState(loadResponse: Resource<LoadResponse>?) {
         if (loadResponse == null) return
+        val binding = binding ?: return
         //activity?.window?.navigationBarColor =
         //    requireContext().colorFromAttribute(R.attr.bitDarkerGrayBackground)
 
@@ -226,11 +246,12 @@ class ResultFragment : Fragment() {
                                 resultTabs.newTab().setText(R.string.related).setId(2)
                             )
                             relatedList.apply {
-                                val mainPageAdapter = MainAdapter2(this, 0)
+                                setRecycledViewPool(MainAdapter.sharedPool)
+                                val mainPageAdapter = MainAdapter(this, 0)
                                 adapter = mainPageAdapter
                                 mainPageAdapter.submitList(res.related)
                             }
-                            setupGridView()
+                            fixLayout(binding.root)
                         }
                         if (hasChapters) {
                             resultTabs.addTab(
@@ -246,15 +267,17 @@ class ResultFragment : Fragment() {
                     }
 
 
-                    viewsAndRating.isVisible = res.views != null || res.peopleVoted != null
+                    //viewsAndRating.isVisible = res.views != null || res.peopleVoted != null
 
-                    resultStatus.text = res.status?.resource?.let { getString(it) } ?: ""
+                    val readStatusText = res.status?.resource?.let { getString(it) } ?: ""
+                    resultStatus.text = readStatusText
+                    resultStatus.isVisible = readStatusText.isNotBlank()
 
                     resultTag.removeAllViews()
                     if (res.tags == null && res.status == null) {
-                        resultTagHolder.isVisible = false
+                        // resultTagHolder.isVisible = false
                     } else {
-                        resultTagHolder.isGone = res.tags.isNullOrEmpty()
+                        // resultTagHolder.isGone = res.tags.isNullOrEmpty()
                         resultTag.apply {
 
                             val map =
@@ -315,7 +338,13 @@ class ResultFragment : Fragment() {
                     }
 
                     if (res is StreamResponse) {
+                        resultChaptersInfoHolder.isVisible = true
+                        resultChapters.text = res.data.size.toString()
+                        resultChaptersInfo.text =
+                            if (res.data.size == 1) getString(R.string.chapter) else getString(R.string.chapters)
                         resultQuickstream.isVisible = true
+                        resultQuickstream.isEnabled = res.data.isNotEmpty()
+                        resultQuickstream.alpha = if (res.data.isNotEmpty()) 1f else 0.5f
                         resultTotalChapters.isVisible = true
                         if (res.data.isNotEmpty()) {
                             resultTotalChapters.text =
@@ -324,6 +353,7 @@ class ResultFragment : Fragment() {
                             resultTotalChapters.text = getString(R.string.no_chapters)
                         }
                     } else {
+                        resultChaptersInfoHolder.isVisible = false
                         resultTotalChapters.isVisible = false
                         resultQuickstream.isVisible = false
                     }
@@ -332,8 +362,17 @@ class ResultFragment : Fragment() {
                     resultLoadingError.isVisible = false
                     resultHolder.isVisible = true
                     resultPosterBlur.isVisible = true
+                    resultHolder.doOnNextLayout {
+                        updateScrollHeight()
+                    }
                     resultHolder.post {
                         updateScrollHeight()
+                        resultHolder.post {
+                            updateScrollHeight()
+                            resultHolder.post {
+                                updateScrollHeight()
+                            }
+                        }
                     }
                 }
             }
@@ -465,9 +504,7 @@ class ResultFragment : Fragment() {
         return items
     }
 
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-
+    override fun onBindingCreated(binding: FragmentResultBinding, savedInstanceState: Bundle?) {
         val url = savedInstanceState?.getString("url") ?: arguments?.getString("url")
         ?: throw NotImplementedError()
         val apiName = savedInstanceState?.getString("apiName") ?: arguments?.getString("apiName")
@@ -482,7 +519,7 @@ class ResultFragment : Fragment() {
         binding.apply {
             activity?.fixPaddingStatusbar(resultInfoHeader)
 
-            resultOpeninbrowerText.text = apiName //""// resultUrl
+            //resultOpeninbrowerText.text = apiName //""// resultUrl
 
             resultReloadConnectionerror.setOnClickListener {
                 viewModel.initState(apiName, url)
@@ -529,8 +566,8 @@ class ResultFragment : Fragment() {
                 viewModel.share()
             }
 
-            val reviewAdapter = ReviewAdapter2()
-
+            val reviewAdapter = ReviewAdapter()
+            resultReviews.setRecycledViewPool(ReviewAdapter.sharedPool)
             resultReviews.adapter = reviewAdapter
             resultReviews.layoutManager = GridLayoutManager(context, 1)
 
@@ -567,11 +604,14 @@ class ResultFragment : Fragment() {
             })
 
             resultBookmark.setOnClickListener { view ->
-                view.popupMenu(
-                    ReadType.entries.map { it.prefValue to it.stringRes },
-                    selectedItemId = viewModel.readState.value?.prefValue
-                ) {
-                    viewModel.bookmark(itemId)
+                val context = view.context ?: return@setOnClickListener
+                context.showBottomDialog(
+                    ReadType.entries.map { context.getString(it.stringRes) },
+                    selectedIndex = ReadType.entries.map { it.prefValue }
+                        .indexOf(viewModel.readState.value?.prefValue),
+                    context.getString(R.string.bookmark), false, {}
+                ) { selected ->
+                    viewModel.bookmark(ReadType.entries[selected].prefValue)
                 }
             }
 
@@ -613,6 +653,20 @@ class ResultFragment : Fragment() {
             }*/
         }
 
+        fun updateReadProgress(
+            readCount: Int = viewModel.readCount.value ?: 0,
+            totalChapters: Int = viewModel.downloadState.value?.total?.toInt() ?: 0,
+            downloadCount: Int = viewModel.downloadState.value?.progress?.toInt() ?: 0
+        ) {
+            val safeTotal = maxOf(totalChapters, readCount, downloadCount, 1)
+            val readProgress = readCount.coerceIn(0, safeTotal)
+            val downloadProgress = downloadCount.coerceIn(0, safeTotal)
+
+            binding.resultReadProgressText.text = "$readProgress/$safeTotal"
+            animateProgress(binding.resultReadProgressBar, safeTotal, readProgress)
+            updateProgressLayering(binding, downloadProgress, readProgress)
+        }
+
         observe(viewModel.currentTabIndex) { pos ->
             binding.apply {
                 resultNovelHolder.isVisible = 0 == pos
@@ -631,13 +685,20 @@ class ResultFragment : Fragment() {
             }
         }
 
-        observe(viewModel.readState) {
-            binding.resultBookmark.setImageResource(if (it == ReadType.NONE) R.drawable.ic_baseline_bookmark_border_24 else R.drawable.ic_baseline_bookmark_24)
+        observe(viewModel.readState) { state ->
+            binding.resultBookmark.setText(if (state == ReadType.NONE) R.string.bookmark else state.stringRes)
+            binding.resultBookmark.setCompoundDrawablesWithIntrinsicBounds(
+                0,
+                0,
+                0,
+                if (state == ReadType.NONE) R.drawable.ic_baseline_bookmark_border_24 else R.drawable.ic_baseline_bookmark_24
+                //if (it == ReadType.NONE) R.drawable.ic_baseline_bookmark_border_24 else R.drawable.ic_baseline_bookmark_24
+            )
         }
         observe(viewModel.loadResponse, ::newState)
 
-
         binding.chapterList.apply {
+            setRecycledViewPool(ChapterAdapter.sharedPool)
             val mainPageAdapter = ChapterAdapter(viewModel)
             adapter = mainPageAdapter
             setHasFixedSize(true)
@@ -716,6 +777,10 @@ class ResultFragment : Fragment() {
             bottomSheetDialog.show()
         }
 
+        observe(viewModel.readCount) { readCount ->
+            updateReadProgress(readCount = readCount)
+        }
+
         observe(viewModel.downloadState) { progressState ->
             if (progressState == null) {
                 //binding.downloadDeleteTrashFromResult.isVisible = false
@@ -727,55 +792,32 @@ class ResultFragment : Fragment() {
                 isVisible = hasDownload
                 isClickable = hasDownload
             }*/
-            binding.resultDownloadProgressText.text =
-                "${progressState.progress}/${progressState.total}"
-
-            // Update read progress text with correct total
             val readCount = viewModel.readCount.value ?: 0
-            binding.resultReadProgressText.text = "$readCount/${progressState.total}"
+            val safeTotal = maxOf(
+                progressState.total.toInt(),
+                progressState.progress.toInt(),
+                readCount,
+                1
+            )
+            val downloadProgress = progressState.progress.toInt().coerceIn(0, safeTotal)
+            val readProgress = readCount.coerceIn(0, safeTotal)
 
-            val downloadProgress = progressState.progress.toInt()
-            
-            // Bring the shorter bar to front so it's visible
-            if (downloadProgress < readCount) {
-                binding.resultDownloadProgressBar.bringToFront()
-            } else {
-                binding.resultReadProgressBar.bringToFront()
+            binding.resultDownloadProgressText.text =
+                "$downloadProgress/$safeTotal"
+            binding.resultDownloadProgressTextEta.apply {
+                text = progressState.eta(context)
+                isVisible = text.isNotBlank()
             }
 
-            binding.resultReadProgressBar.apply {
-                max = progressState.total.toInt() * 100
-                val animation: ObjectAnimator = ObjectAnimator.ofInt(
-                    this,
-                    "progress",
-                    this.progress,
-                    readCount * 100
-                )
-                animation.duration = 500
-                animation.setAutoCancel(true)
-                animation.interpolator = DecelerateInterpolator()
-                animation.start()
-            }
-
-            binding.resultDownloadProgressBar.apply {
-                max = progressState.total.toInt() * 100
-
-                val animation: ObjectAnimator = ObjectAnimator.ofInt(
-                    this,
-                    "progress",
-                    this.progress,
-                    downloadProgress * 100
-                )
-                animation.duration = 500
-                animation.setAutoCancel(true)
-                animation.interpolator = DecelerateInterpolator()
-                animation.start()
-            }
+            animateProgress(binding.resultDownloadProgressBar, safeTotal, downloadProgress)
+            binding.resultReadProgressText.text = "$readProgress/$safeTotal"
+            animateProgress(binding.resultReadProgressBar, safeTotal, readProgress)
+            updateProgressLayering(binding, downloadProgress, readProgress)
 
             val ePubGeneration = progressState.progress > 0
             binding.resultDownloadGenerateEpub.apply {
                 isEnabled = ePubGeneration
-                alpha = if (isEnabled) 1f else 0.5f
+                alpha = if (ePubGeneration) 1f else 0.5f
             }
 
             val canDownload =
@@ -784,7 +826,7 @@ class ResultFragment : Fragment() {
             val canClick = progressState.total > 0
             binding.resultDownloadBtt.apply {
                 isEnabled = canClick
-                alpha = if (isEnabled) 1f else 0.5f
+                alpha = if (canClick) 1f else 0.5f
 
                 //iconSize = 30.toPx
                 setText(
@@ -818,35 +860,6 @@ class ResultFragment : Fragment() {
                         else -> R.drawable.netflix_download
                     }
                 )
-            }
-        }
-
-        observe(viewModel.readCount) { readCount ->
-            val total = viewModel.downloadState.value?.total?.toInt() ?: 0
-            if (total > 0) {
-                binding.resultReadProgressText.text = "$readCount/$total"
-                
-                val downloadProgress = viewModel.downloadState.value?.progress?.toInt() ?: 0
-                // Bring the shorter bar to front so it's visible
-                if (downloadProgress < readCount) {
-                    binding.resultDownloadProgressBar.bringToFront()
-                } else {
-                    binding.resultReadProgressBar.bringToFront()
-                }
-                
-                binding.resultReadProgressBar.apply {
-                    max = total * 100
-                    val animation: ObjectAnimator = ObjectAnimator.ofInt(
-                        this,
-                        "progress",
-                        this.progress,
-                        readCount * 100
-                    )
-                    animation.duration = 500
-                    animation.setAutoCancel(true)
-                    animation.interpolator = DecelerateInterpolator()
-                    animation.start()
-                }
             }
         }
 

@@ -4,7 +4,6 @@ import com.lagradost.quicknovel.ErrorLoadingException
 import com.lagradost.quicknovel.HeadMainPageResponse
 import com.lagradost.quicknovel.LoadResponse
 import com.lagradost.quicknovel.MainAPI
-import com.lagradost.quicknovel.MainActivity.Companion.app
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.SearchResponse
 import com.lagradost.quicknovel.fixUrlNull
@@ -24,6 +23,15 @@ open class AllNovelProvider : MainAPI() {
     override val iconBackgroundId = R.color.wuxiaWorldOnlineColor
 
     open val ajaxUrl = "ajax-chapter-option"
+
+    private val movilUserAgent = mapOf(
+        "user-agent" to "Mozilla/5.0 (Linux; Android 13; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Mobile Safari/537.36"
+    )
+    private val pcUserAgent = mapOf(
+        "user-agent" to "Mozilla/5.0"
+    )
+
+    open val requireMobilUserAgent = false
 
     override val tags = listOf(
         "All" to "All",
@@ -93,6 +101,10 @@ open class AllNovelProvider : MainAPI() {
         "Most Popular" to "most-popular",
     )
 
+    //this is to prevent zoom on images
+    open fun String.fullPosterFix(): String =
+        this.replace("fc05345726d3e134d2f7187dc70f047b","4d27e0af8cf6e971f7ee3c995fc55190")
+            .replace("9798407846f8032e6a88fa71b2c62ce9","9c3d392ccc7c95187a8c6e37c6bdac6f")
 
     override suspend fun loadMainPage(
         page: Int,
@@ -102,21 +114,19 @@ open class AllNovelProvider : MainAPI() {
     ): HeadMainPageResponse {
         val url =
             if (orderBy == "" && tag != "All") "$mainUrl/genre/$tag?page=$page" else "$mainUrl/${if (orderBy.isNullOrBlank()) "hot-novel" else orderBy}?page=$page"
-        val document = app.get(url).document
+        val document = app.get(url, headers = if(requireMobilUserAgent) movilUserAgent else pcUserAgent).document
 
         return HeadMainPageResponse(
             url,
             list = document.select("div.list>div.row").mapNotNull { element ->
                 val a =
                     element.selectFirst("div > div > h3.truyen-title > a") ?: return@mapNotNull null
-                SearchResponse(
+                newSearchResponse(
                     name = a.text(),
                     url = fixUrlNull(a.attr("href")) ?: return@mapNotNull null,
-                    fixUrlNull(element.selectFirst("div > div > img")?.attr("src")),
-                    null,
-                    null,
-                    this.name
-                )
+                ){
+                    posterUrl = fixUrlNull(element.selectFirst("div > div > img")?.attr("src")?.fullPosterFix())
+                }
             })
     }
 
@@ -142,20 +152,21 @@ open class AllNovelProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document =
-            app.get("$mainUrl/search?keyword=$query").document // AJAX, MIGHT ADD QUICK SEARCH
-
+            if(requireMobilUserAgent)
+                app.get("$mainUrl/search?keyword=$query", headers =  movilUserAgent).document
+            else
+                app.get("$mainUrl/search?keyword=$query").document// AJAX, MIGHT ADD QUICK SEARCH
         return document.select("#list-page>.archive>.list>.row").mapNotNull { h ->
             val title = h.selectFirst(">div>div>.truyen-title>a")
                 ?: h.selectFirst(">div>div>.novel-title>a") ?: return@mapNotNull null
             newSearchResponse(title.text(), title.attr("href") ?: return@mapNotNull null) {
-                posterUrl = fixUrlNull(h.selectFirst(">div>div>img")?.attr("src"))
+                posterUrl = fixUrlNull(h.selectFirst(">div>div>img")?.attr("src")?.fullPosterFix())
             }
         }
     }
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
-
         val name =
             document.selectFirst("h3.title")?.text() ?: throw ErrorLoadingException("invalid name")
 
@@ -182,22 +193,25 @@ open class AllNovelProvider : MainAPI() {
         }
 
         return newStreamResponse(name, url, data) {
-            tags = document.select("div.info > div:nth-child(3) a").map {
-                it.text()
-            }
-            author = document.selectFirst("div.info > div:nth-child(1) > a")?.text()
-            posterUrl = fixUrlNull(document.select("div.book > img").attr("src"))
+            val infoDivs = document.select("div.info > div").takeIf{ !it.isEmpty() } ?: document.select("ul.info > li")
+
+            author = infoDivs.find { it.text().contains("Author:") }?.selectFirst("a")?.text()
+            tags = infoDivs.find { it.text().contains("Genre") }?.select("a")?.mapNotNull { it.text().takeIf { t -> t.trim().isNotBlank() } }
+
+            val imgElement = document.selectFirst("div.book img")
+            posterUrl = fixUrlNull(
+                imgElement?.attr("src").takeIf { !it.isNullOrBlank() }  ?: imgElement?.attr("data-src")
+            )
             synopsis = document.selectFirst("div.desc-text")?.text()
+
             peopleVoted =
                 document.selectFirst(" div.small > em > strong:nth-child(3) > span")?.text()
                     ?.toIntOrNull() ?: 0
             rating = document.selectFirst("div.small > em > strong:nth-child(1) > span")?.text()
                 ?.toFloatOrNull()?.times(100)?.roundToInt()
 
-            setStatus(
-                document.selectFirst("div.info > div:nth-child(5) > a")?.selectFirst("a")
-                    ?.text()
-            )
+            setStatus(infoDivs.find { it.text().contains("Status:") }?.selectFirst("a")?.text())
+
         }
     }
 }
