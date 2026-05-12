@@ -213,8 +213,8 @@
     <ImageView
         android:id="@+id/result_poster_blur"
         android:layout_width="match_parent"
-        android:layout_height="250dp"
-        android:alpha="0.3"
+        android:layout_height="match_parent"
+        android:alpha="0.35"
         android:background="?attr/primaryBlackBackground"
         android:contentDescription="@string/background_image_descript"
         android:scaleType="centerCrop"
@@ -323,7 +323,7 @@
                     android:id="@+id/result_download_card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/white_card">
+                    android:background="@color/transparent">
 
                     <LinearLayout
                         android:id="@+id/result_scroll_padding"
@@ -340,8 +340,9 @@
                             android:layout_marginTop="10dp"
                             android:layout_width="match_parent"
                             android:layout_height="75dp"
-                            android:backgroundTint="?attr/iconGrayBackground"
+                            android:backgroundTint="@color/transparent"
                             android:elevation="0dp"
+                            app:cardBackgroundColor="@color/transparent"
                             app:cardCornerRadius="15dp">
 
                             <LinearLayout
@@ -742,7 +743,7 @@ Translator: Rainbow Turtle" />
                             android:id="@+id/result_reviewsholder"
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
-                            android:background="@drawable/white_card"
+                            android:background="@color/transparent"
                             android:minHeight="500dp"
                             android:orientation="vertical"
                             android:visibility="gone"
@@ -795,7 +796,7 @@ Translator: Rainbow Turtle" />
                             android:id="@+id/result_relatedholder"
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
-                            android:background="@drawable/white_card"
+                            android:background="@color/transparent"
                             android:minHeight="500dp"
                             android:orientation="vertical"
                             android:visibility="gone"
@@ -815,7 +816,7 @@ Translator: Rainbow Turtle" />
                             android:id="@+id/result_chapterholder"
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
-                            android:background="@drawable/white_card"
+                            android:background="@color/transparent"
                             android:minHeight="500dp"
                             android:orientation="vertical"
                             android:visibility="gone"
