@@ -187,6 +187,7 @@ class ResultViewModel : ViewModel() {
             )
         }
 
+        updateReadCount()
         return true
     }
 
@@ -627,7 +628,7 @@ class ResultViewModel : ViewModel() {
         return cachedInitialResult?.totalChapters ?: 1
     }
 
-    private fun updateReadCount() {
+    fun updateReadCount() {
         readCount.postValue(LibraryProgress.readCountForNovelName(load.name))
     }
 

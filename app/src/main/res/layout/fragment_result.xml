@@ -600,21 +600,62 @@ Translator: Rainbow Turtle" />
                                 <LinearLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
                                     android:orientation="horizontal">
 
-                                    <TextView
-                                        android:id="@+id/result_download_progress_text"
+                                    <LinearLayout
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:textColor="?attr/textColor"
-                                        android:textSize="14sp"
-                                        tools:text="@string/no_data" />
+                                        android:minWidth="72dp"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:id="@+id/result_download_progress_label"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="@string/progress_downloaded"
+                                            android:textColor="?attr/grayTextColor"
+                                            android:textSize="12sp" />
+
+                                        <TextView
+                                            android:id="@+id/result_download_progress_text"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:textColor="?attr/colorPrimary"
+                                            android:textSize="14sp"
+                                            tools:text="12/48" />
+                                    </LinearLayout>
+
+                                    <LinearLayout
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="20dp"
+                                        android:minWidth="72dp"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:id="@+id/result_read_progress_label"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="@string/progress_read"
+                                            android:textColor="?attr/grayTextColor"
+                                            android:textSize="12sp" />
+
+                                        <TextView
+                                            android:id="@+id/result_read_progress_text"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:textColor="?attr/textColor"
+                                            android:textSize="14sp"
+                                            tools:text="5/48" />
+                                    </LinearLayout>
 
                                     <TextView
                                         android:id="@+id/result_download_progress_text_eta"
-                                        android:layout_width="match_parent"
+                                        android:layout_width="0dp"
                                         android:layout_height="wrap_content"
                                         android:layout_gravity="end"
+                                        android:layout_weight="1"
                                         android:gravity="end"
                                         android:textColor="?attr/textColor"
                                         android:textSize="14sp"
@@ -633,12 +674,12 @@ Translator: Rainbow Turtle" />
                                         android:layout_marginTop="10dp"
                                         android:layout_marginBottom="10dp"
                                         android:indeterminate="false"
-                                        android:progressBackgroundTint="?attr/textColor"
-                                        android:progressTint="?attr/textColor"
+                                        android:progressBackgroundTint="?attr/primaryGrayBackground"
+                                        android:progressTint="?attr/colorPrimary"
                                         tools:progress="50" />
 
                                     <androidx.core.widget.ContentLoadingProgressBar
-                                        android:id="@+id/result_download_progress_bar_not_downloaded"
+                                        android:id="@+id/result_read_progress_bar"
                                         style="@android:style/Widget.Material.ProgressBar.Horizontal"
                                         android:layout_width="match_parent"
                                         android:layout_height="wrap_content"
@@ -646,7 +687,7 @@ Translator: Rainbow Turtle" />
                                         android:layout_marginBottom="10dp"
                                         android:indeterminate="false"
                                         android:progressBackgroundTint="@color/transparent"
-                                        android:progressTint="?attr/colorPrimary"
+                                        android:progressTint="?attr/textColor"
                                         tools:progress="20" />
                                 </FrameLayout>
 
@@ -657,7 +698,7 @@ Translator: Rainbow Turtle" />
 
                                     <com.google.android.material.button.MaterialButton
                                         android:id="@+id/result_download_generate_epub"
-                                        style="@style/WhiteButton"
+                                        style="@style/ResultOutlineButton"
                                         android:layout_width="50dp"
                                         android:layout_marginStart="0dp"
                                         android:layout_marginEnd="5dp"
@@ -671,7 +712,7 @@ Translator: Rainbow Turtle" />
                                           android:textColor="?attr/textColor"-->
                                     <com.google.android.material.button.MaterialButton
                                         android:id="@+id/result_download_btt"
-                                        style="@style/BlackButton"
+                                        style="@style/ResultOutlineButton"
                                         android:layout_width="50dp"
 
                                         android:layout_columnWeight="1"
@@ -685,7 +726,7 @@ Translator: Rainbow Turtle" />
 
                                 <com.google.android.material.button.MaterialButton
                                     android:id="@+id/result_quickstream"
-                                    style="@style/WhiteButton"
+                                    style="@style/ResultOutlineButton"
                                     android:layout_width="match_parent"
                                     android:layout_marginStart="0dp"
 

@@ -92,6 +92,8 @@
     <string name="type_plan_to_read">Planeo leer</string>
     <string name="type_none">Ninguno</string>
     <string name="type_trash">Papelera</string>
+    <string name="progress_downloaded">Descargado</string>
+    <string name="progress_read">Leído</string>
 
     <!-- Interfaz del Lector -->
     <string name="read_action_settings">Ajustes</string>

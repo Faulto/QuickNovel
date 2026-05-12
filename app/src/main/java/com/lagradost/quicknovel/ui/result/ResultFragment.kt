@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import androidx.appcompat.app.AlertDialog
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.core.view.doOnNextLayout
@@ -98,6 +99,7 @@ class ResultFragment : BaseFragment<FragmentResultBinding>(
         //only if really is onResume
         if (viewModel.isResume) {
             (binding?.chapterList?.adapter as? ChapterAdapter)?.notifyDataSetChanged()
+            viewModel.updateReadCount()
             viewModel.isResume = false
         }
 
@@ -134,6 +136,35 @@ class ResultFragment : BaseFragment<FragmentResultBinding>(
                 maxOf(0, total)
             )
         }*/
+    }
+
+    private fun animateProgress(progressBar: ProgressBar, total: Int, progress: Int) {
+        val safeTotal = total.coerceAtLeast(1)
+        val target = progress.coerceIn(0, safeTotal) * 100
+        progressBar.max = safeTotal * 100
+
+        val animation: ObjectAnimator = ObjectAnimator.ofInt(
+            progressBar,
+            "progress",
+            progressBar.progress,
+            target
+        )
+        animation.duration = 500
+        animation.setAutoCancel(true)
+        animation.interpolator = DecelerateInterpolator()
+        animation.start()
+    }
+
+    private fun updateProgressLayering(
+        binding: FragmentResultBinding,
+        downloadProgress: Int,
+        readProgress: Int
+    ) {
+        if (readProgress <= downloadProgress) {
+            binding.resultReadProgressBar.bringToFront()
+        } else {
+            binding.resultDownloadProgressBar.bringToFront()
+        }
     }
 
 
@@ -259,7 +290,7 @@ class ResultFragment : BaseFragment<FragmentResultBinding>(
                                     context,
                                     null,
                                     0,
-                                    R.style.ChipFilled
+                                    R.style.ChipOutlinedTransparent
                                 )
                                 chip.setChipDrawable(chipDrawable)
                                 chip.text = tag
@@ -312,6 +343,8 @@ class ResultFragment : BaseFragment<FragmentResultBinding>(
                         resultChaptersInfo.text =
                             if (res.data.size == 1) getString(R.string.chapter) else getString(R.string.chapters)
                         resultQuickstream.isVisible = true
+                        resultQuickstream.isEnabled = res.data.isNotEmpty()
+                        resultQuickstream.alpha = if (res.data.isNotEmpty()) 1f else 0.5f
                         resultTotalChapters.isVisible = true
                         if (res.data.isNotEmpty()) {
                             resultTotalChapters.text =
@@ -620,6 +653,20 @@ class ResultFragment : BaseFragment<FragmentResultBinding>(
             }*/
         }
 
+        fun updateReadProgress(
+            readCount: Int = viewModel.readCount.value ?: 0,
+            totalChapters: Int = viewModel.downloadState.value?.total?.toInt() ?: 0,
+            downloadCount: Int = viewModel.downloadState.value?.progress?.toInt() ?: 0
+        ) {
+            val safeTotal = maxOf(totalChapters, readCount, downloadCount, 1)
+            val readProgress = readCount.coerceIn(0, safeTotal)
+            val downloadProgress = downloadCount.coerceIn(0, safeTotal)
+
+            binding.resultReadProgressText.text = "$readProgress/$safeTotal"
+            animateProgress(binding.resultReadProgressBar, safeTotal, readProgress)
+            updateProgressLayering(binding, downloadProgress, readProgress)
+        }
+
         observe(viewModel.currentTabIndex) { pos ->
             binding.apply {
                 resultNovelHolder.isVisible = 0 == pos
@@ -730,6 +777,10 @@ class ResultFragment : BaseFragment<FragmentResultBinding>(
             bottomSheetDialog.show()
         }
 
+        observe(viewModel.readCount) { readCount ->
+            updateReadProgress(readCount = readCount)
+        }
+
         observe(viewModel.downloadState) { progressState ->
             if (progressState == null) {
                 //binding.downloadDeleteTrashFromResult.isVisible = false
@@ -741,42 +792,31 @@ class ResultFragment : BaseFragment<FragmentResultBinding>(
                 isVisible = hasDownload
                 isClickable = hasDownload
             }*/
+            val readCount = viewModel.readCount.value ?: 0
+            val safeTotal = maxOf(
+                progressState.total.toInt(),
+                progressState.progress.toInt(),
+                readCount,
+                1
+            )
+            val downloadProgress = progressState.progress.toInt().coerceIn(0, safeTotal)
+            val readProgress = readCount.coerceIn(0, safeTotal)
+
             binding.resultDownloadProgressText.text =
-                "${progressState.progress}/${progressState.total}"
-
-            binding.resultDownloadProgressBarNotDownloaded.apply {
-                println("progressState: ${progressState}")
-                max = progressState.total.toInt() * 100
-                val animation: ObjectAnimator = ObjectAnimator.ofInt(
-                    this,
-                    "progress",
-                    this.progress,
-                    (progressState.progress - progressState.downloaded).toInt() * 100
-                )
-                animation.duration = 500
-                animation.setAutoCancel(true)
-                animation.interpolator = DecelerateInterpolator()
-                animation.start()
+                "$downloadProgress/$safeTotal"
+            binding.resultDownloadProgressTextEta.apply {
+                text = progressState.eta(context)
+                isVisible = text.isNotBlank()
             }
 
-            binding.resultDownloadProgressBar.apply {
-                max = progressState.total.toInt() * 100
-
-                val animation: ObjectAnimator = ObjectAnimator.ofInt(
-                    this,
-                    "progress",
-                    this.progress,
-                    progressState.progress.toInt() * 100
-                )
-                animation.duration = 500
-                animation.setAutoCancel(true)
-                animation.interpolator = DecelerateInterpolator()
-                animation.start()
-            }
+            animateProgress(binding.resultDownloadProgressBar, safeTotal, downloadProgress)
+            binding.resultReadProgressText.text = "$readProgress/$safeTotal"
+            animateProgress(binding.resultReadProgressBar, safeTotal, readProgress)
+            updateProgressLayering(binding, downloadProgress, readProgress)
 
             val ePubGeneration = progressState.progress > 0
             binding.resultDownloadGenerateEpub.apply {
-                isClickable = ePubGeneration
+                isEnabled = ePubGeneration
                 alpha = if (ePubGeneration) 1f else 0.5f
             }
 
@@ -785,7 +825,7 @@ class ResultFragment : BaseFragment<FragmentResultBinding>(
 
             val canClick = progressState.total > 0
             binding.resultDownloadBtt.apply {
-                isClickable = canClick
+                isEnabled = canClick
                 alpha = if (canClick) 1f else 0.5f
 
                 //iconSize = 30.toPx
